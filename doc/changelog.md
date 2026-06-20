@@ -12,3 +12,8 @@
 - 「📂 開く」ボタン横に「▼」ドロップダウンで過去のフォルダを選択可能に
 - 履歴は `%APPDATA%/lepafy/history.json` に最大20件保存
 - 変更ファイル: main.js, preload.js, renderer.js, index.html, styles.css
+
+### mviewer: ビルド実行
+- teamexec で mviewer のビルドを委譲（electron-builder）
+- 成果物: `Lepafy Setup 1.1.0.exe`（97MB, NSIS インストーラー）, `Lepafy 1.1.0.exe`（97MB, ポータブル版）
+- ターゲット: Windows x64 / Electron 42.2.0
