@@ -17,3 +17,16 @@
 - teamexec で mviewer のビルドを委譲（electron-builder）
 - 成果物: `Lepafy Setup 1.1.0.exe`（97MB, NSIS インストーラー）, `Lepafy 1.1.0.exe`（97MB, ポータブル版）
 - ターゲット: Windows x64 / Electron 42.2.0
+
+## 2026-06-21
+
+### mviewer: ドライブ使用率インジケータを実装委譲
+- ツールバーに現在開いているフォルダのドライブ使用率を表示
+- 表示: 💾 D: 1.4TB / 1.9TB (75%) + ミニプログレスバー
+- 色分け: 緑(<70%) / 黄(70-90%) / 赤(>90%)
+- `fs.promises.statfs` 使用（追加依存なし）
+- バー表示修正: display:block追加、背景/ボーダー改善
+
+### mviewer: ビルド & wrap up
+- クリーンビルド実行 → Lepafy 1.1.0（インストーラー + ポータブル版）
+- wrap up 委譲 → コミット b63792c、origin/main プッシュ済み
