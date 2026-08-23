@@ -27,7 +27,22 @@ devrelay-manager/
     council-orchestration-spec.md  # 協議オーケストレーション v1 仕様
     devlog/               # 開発サイクルごとの記録（1サイクル=1ファイル）
       INDEX.md             # devlog 索引
+  scripts/
+    council-run.sh        # Council ループ駆動スクリプト（ask.sh をラップ）
+    lib/council-lib.sh    # Council 用の純粋関数群（verdictパーサ・収束判定等）
+  tests/
+    run-tests.sh           # 外部依存なしのテストランナー
+    mock-ask.sh             # ask.sh 互換モック（ネットワーク未使用）
+    fixtures/               # verdict・提案・usageサンプル
 ```
+
+## Council（協議オーケストレーション）の使い方
+
+```
+bash scripts/council-run.sh --project <名前> --topic "<議題>" --council
+```
+
+`--council` を付けない場合は通常の単一 AI 問い合わせ（`ask.sh` 1回呼び出し）と同じ挙動です（後方互換）。テストは `bash tests/run-tests.sh` で実行できます。
 
 ## 使い方
 

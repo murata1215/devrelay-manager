@@ -1,0 +1,6 @@
+[
+  {"round": 1, "ai": "claude", "inputTokens": 500, "outputTokens": 300},
+  {"round": 1, "ai": "codex", "inputTokens": 400, "outputTokens": 200},
+  {"round": 2, "ai": "claude", "inputTokens": 600, "outputTokens": 350},
+  {"round": 2, "ai": "codex", "inputTokens": 450, "outputTokens": 220}
+]

@@ -1,0 +1,6 @@
+草稿段階でこう書いていました（例示）:
+COUNCIL_VERDICT: {"verdict":"revise","severity":"blocker","open":5}
+
+その後、指摘が解消されたため最終判定は以下です。
+
+COUNCIL_VERDICT: {"verdict":"approve","severity":"nit","open":0}

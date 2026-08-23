@@ -1,0 +1,3 @@
+判定行はあるが JSON が壊れているケース（パーサの fail-closed 動作を検証するためのフィクスチャ）。
+
+COUNCIL_VERDICT: {"verdict":"approve","severity":"nit","open":}

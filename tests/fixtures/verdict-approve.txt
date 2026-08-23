@@ -1,0 +1,3 @@
+この提案は妥当です。特に大きな問題は見当たりません。
+
+COUNCIL_VERDICT: {"verdict":"approve","severity":"nit","open":0}

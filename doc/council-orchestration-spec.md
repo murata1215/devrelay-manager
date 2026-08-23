@@ -62,7 +62,7 @@ council-run.sh --topic "..." --max-rounds 4 --cost-limit <tokens>
 
 **依存確認事項（実装第一歩の候補）:** `ask` がプロジェクトの defaultAi と無関係に AI を指定（`--ai claude` / `--ai codex`）できるか。できない場合は ask フローに `--ai` パラメータを追加するのが最初のタスク。
 
-> **確認結果（2026-08-23 時点）:** `~/.claude/skills/devrelay-ask-member/scripts/ask.sh` を調査した結果、現状のオプションは `--project` / `--exec` / `--machine` / `--list` / `--question` のみで、**`--ai` オプションは未実装**であることを確認した。したがって v1 実装フェーズの最初のタスクは「`ask.sh`（および ask フロー全体）への `--ai` パラメータ追加」で確定する。
+> **確認結果（2026-08-23 時点、council-run.sh 実装サイクルで再確認）:** `~/.claude/skills/devrelay-ask-member/scripts/ask.sh` を調査した結果、`--ai <claude|codex>` は**実装済み**（#325）であることを確認した。ただし**質問モード専用**であり `--exec` とは併用不可。`council-run.sh` はプランモード完結（spec §0）のため、この制約と整合する。
 
 ## 4. deliberationId と「真実は DB」の両立
 

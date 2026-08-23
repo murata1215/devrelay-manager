@@ -45,3 +45,11 @@
 - `doc/devlog/` を新規作成（1サイクル＝1ファイルの開発記録）
 - `doc/devlog/2026-08-23_133347.md`（サイクル1.0: 協議オーケストレーション v1 仕様確定）を作成
 - `doc/devlog/INDEX.md` を新規作成し、サイクル一覧の索引運用を開始
+
+### council-run.sh 骨格実装（codex 非依存スコープ）
+- `scripts/lib/council-lib.sh` を新規作成: deliberationId 採番、`COUNCIL_META` ヘッダ生成、`COUNCIL_VERDICT` パーサ（fail-closed）、収束判定、usageData 合算、ask.sh 前置き除去、残論点抽出、AI 検出の8関数
+- `scripts/council-run.sh` を新規作成: `ask.sh` をラップする決定的ループ本体。`--council` オプトイン（デフォルト OFF）、AI 2種未満時の静かなフォールバック、最大反復ハードキャップ（10）、人間への提示は最終1回のみ
+- `tests/mock-ask.sh` + `tests/fixtures/`（verdict 8種・提案2種・usageサンプル）+ `tests/run-tests.sh`（外部依存なし自作テストランナー）を新規作成。55アサーション全パス
+- spec §3 の陳腐化注記を更新: `ask.sh` の `--ai` は実装済み（質問モード専用）と訂正
+- 実装過程で2件のバグを自己発見・修正: ログファイル名の秒精度衝突、max_rounds 打ち切り時のラウンド数表示ズレ
+- 実 codex への ask は週間上限（2026-08-24 22:17 JST まで）のため未実施。ライブ結線は次サイクル

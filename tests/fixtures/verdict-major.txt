@@ -1,0 +1,5 @@
+blocker は解消されました。残りは以下です。
+
+- [major] エラーハンドリングが握りつぶしになっており、失敗が検知できません。
+
+COUNCIL_VERDICT: {"verdict":"revise","severity":"major","open":1}

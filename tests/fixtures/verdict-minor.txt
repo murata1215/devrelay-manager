@@ -1,0 +1,5 @@
+blocker/major は解消されました。軽微な指摘のみです。
+
+- [minor] コメントが英語と日本語で混在しています。
+
+COUNCIL_VERDICT: {"verdict":"revise","severity":"minor","open":1}

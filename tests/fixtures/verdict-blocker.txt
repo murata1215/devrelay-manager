@@ -1,0 +1,7 @@
+以下の指摘があります。
+
+- [blocker] トランザクション境界が未定義で、部分失敗時にデータ不整合が起きます。
+- [major] リトライ処理が指数バックオフになっておらず、外部APIに過負荷をかけます。
+- [minor] 変数名 tmp が意味不明瞭です。
+
+COUNCIL_VERDICT: {"verdict":"revise","severity":"blocker","open":2}

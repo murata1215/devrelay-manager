@@ -1,0 +1,5 @@
+ほぼ完成しています。些末な指摘のみです。
+
+- [nit] インデントが1箇所だけ揃っていません。
+
+COUNCIL_VERDICT: {"verdict":"revise","severity":"nit","open":1}
