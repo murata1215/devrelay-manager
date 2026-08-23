@@ -10,6 +10,7 @@ DevRelay のオーケストレーター（Manager）プロジェクト。
 - **クロスプロジェクト問い合わせ** — 他プロジェクトの仕様や状態を質問
 - **ビルド委譲** — 対象プロジェクトに実装作業を委譲（teamexec）
 - **新規プロジェクト作成** — 対象マシンに scaffold を作成
+- **協議オーケストレーション (Council)** — claude↔codex の逐次協議によりプランを強化してから人間承認ゲートに乗せる（v1 仕様: `doc/council-orchestration-spec.md`、デフォルト OFF・`--council` オプトイン）
 
 ## ディレクトリ構成
 
@@ -23,6 +24,9 @@ devrelay-manager/
   doc/
     changelog.md         # 変更履歴
     issues.md            # 課題管理
+    council-orchestration-spec.md  # 協議オーケストレーション v1 仕様
+    devlog/               # 開発サイクルごとの記録（1サイクル=1ファイル）
+      INDEX.md             # devlog 索引
 ```
 
 ## 使い方
