@@ -16,7 +16,7 @@ model Thread {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  messages  Message[]
+  messages   Message[]
   dispatches Dispatch[]
 }
 
@@ -25,7 +25,7 @@ model Message {
   id        String   @id @default(cuid())
   threadId  String
   thread    Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  role      String   // 'user' | 'manager'
+  role      String // 'user' | 'manager'
   content   String
   createdAt DateTime @default(now())
 
@@ -36,22 +36,30 @@ model Message {
 
 /// per-repo ビルドへの参照＝監査の原子。
 /// 権威データ（実 build・監査ログ）は core 側に残り、ここは参照（projectId/submissionId/buildId）とスレ文脈のみを持つ。
+/// status 遷移は src/orchestrator/dispatch-state.ts の遷移表が唯一の権威。値は
+/// 'draft' | 'submitting' | 'planning' | 'awaiting_approval' | 'stale' | 'approving' | 'building' | 'done' | 'failed' | 'stopped'
+/// （doc/orchestrator-layer3-design.md §2 の10状態。'pending' は含まない）。
 model Dispatch {
-  id           String   @id @default(cuid())
-  threadId     String
-  thread       Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  messageId    String?
-  message      Message? @relation(fields: [messageId], references: [id])
-  projectId    String
-  submissionId String?
-  buildId      String?
-  status       String   @default("pending") // 'pending' | 'planning' | 'awaiting_approval' | 'building' | 'done' | 'failed' | 'stopped'
-  devlogPath   String?
-  cost         Float?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String    @id @default(cuid())
+  threadId        String
+  thread          Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  messageId       String?
+  message         Message?  @relation(fields: [messageId], references: [id])
+  projectId       String
+  instruction     String?
+  submissionId    String?
+  buildId         String?
+  status          String    @default("draft")
+  statusChangedAt DateTime  @default(now())
+  statusReason    String?
+  lastPolledAt    DateTime?
+  devlogPath      String?
+  cost            Float?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([threadId])
   @@index([messageId])
   @@index([projectId])
+  @@index([status, statusChangedAt])
 }

@@ -13,7 +13,10 @@
     "start": "node dist/index.js",
     "db:studio": "prisma studio",
     "migrate": "prisma migrate dev",
-    "smoke:core": "tsx scripts/smoke-core.ts"
+    "migrate:create": "prisma migrate dev --create-only",
+    "smoke:core": "tsx scripts/smoke-core.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "sh -c 'files=$(find src -name \"*.test.ts\" | sort); [ -n \"$files\" ] || { echo \"no test files found\" >&2; exit 1; }; exec node --import tsx --test $files'"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
