@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { transitionDispatch } from './dispatch-store.js';
-import type { DispatchClient } from './dispatch-store.js';
+import {
+  transitionDispatch,
+  tryTransitionDispatch,
+  claimDispatch,
+  notePollResult,
+} from './dispatch-store.js';
+import type { DispatchClient, DispatchQueryClient, DispatchListRow } from './dispatch-store.js';
 
 interface StubCalls {
   updateMany: Array<{ where: { id: string; status: string }; data: Record<string, unknown> }>;
@@ -156,3 +161,106 @@ test('22. stale -> draft は submissionId: null を送る', async () => {
   assert.equal(calls.updateMany[0].data.submissionId, null);
   assert.equal(calls.updateMany[0].data.status, 'draft');
 });
+
+test('42. transitionDispatch: at を渡すと statusChangedAt に注入した時刻が使われる', async () => {
+  const { client, calls } = createStubClient();
+  const at = new Date('2026-08-25T00:00:00Z');
+  await transitionDispatch(client, {
+    id: 'd1',
+    from: 'draft',
+    to: 'submitting',
+    patch: { instruction: 'x' },
+    at,
+  });
+  assert.equal(calls.updateMany[0].data.statusChangedAt, at);
+});
+
+test('43. tryTransitionDispatch: 成功時は true を返し DB を1回だけ更新する', async () => {
+  const { client, calls } = createStubClient();
+  const ok = await tryTransitionDispatch(client, {
+    id: 'd1',
+    from: 'planning',
+    to: 'awaiting_approval',
+    patch: { submissionId: 'sub_1' },
+  });
+  assert.equal(ok, true);
+  assert.equal(calls.updateMany.length, 1);
+});
+
+test('44. tryTransitionDispatch: count===0（他インスタンスに先を越された）は throw せず false', async () => {
+  const { client } = createStubClient({ updateManyCount: 0 });
+  const ok = await tryTransitionDispatch(client, {
+    id: 'd1',
+    from: 'planning',
+    to: 'awaiting_approval',
+    patch: { submissionId: 'sub_1' },
+  });
+  assert.equal(ok, false);
+});
+
+test('45. tryTransitionDispatch: 不正遷移・不変条件違反は依然として throw する（DB 呼び出し前）', async () => {
+  const { client, calls } = createStubClient();
+  await assert.rejects(tryTransitionDispatch(client, { id: 'd1', from: 'done', to: 'building' }));
+  assert.equal(calls.updateMany.length, 0);
+
+  const { client: client2, calls: calls2 } = createStubClient();
+  await assert.rejects(
+    tryTransitionDispatch(client2, { id: 'd1', from: 'submitting', to: 'planning', patch: {} })
+  );
+  assert.equal(calls2.updateMany.length, 0);
+});
+
+test('46. claimDispatch: data は lastPolledAt のみ・成功で true', async () => {
+  const { client, calls } = createStubClient();
+  const now = new Date('2026-08-25T00:10:00Z');
+  const ok = await claimDispatch(client, { id: 'd1', status: 'submitting', now });
+  assert.equal(ok, true);
+  assert.equal(calls.updateMany.length, 1);
+  assert.deepEqual(calls.updateMany[0].where, { id: 'd1', status: 'submitting' });
+  assert.deepEqual(calls.updateMany[0].data, { lastPolledAt: now });
+});
+
+test('47. claimDispatch: CAS 敗北（count===0）は false を返す（例外にしない）', async () => {
+  const { client } = createStubClient({ updateManyCount: 0 });
+  const ok = await claimDispatch(client, {
+    id: 'd1',
+    status: 'submitting',
+    now: new Date('2026-08-25T00:10:00Z'),
+  });
+  assert.equal(ok, false);
+});
+
+test('48. notePollResult: status を書かない（updateMany の data に status キーが無い）', async () => {
+  const { client, calls } = createStubClient();
+  await notePollResult(client, {
+    id: 'd1',
+    status: 'building',
+    patch: { buildId: 'build_123' },
+  });
+  assert.equal(calls.updateMany.length, 1);
+  assert.deepEqual(calls.updateMany[0].where, { id: 'd1', status: 'building' });
+  assert.ok(!('status' in calls.updateMany[0].data));
+  assert.equal(calls.updateMany[0].data.buildId, 'build_123');
+});
+
+test('49. notePollResult: patch が空なら DB を一度も呼び出さない', async () => {
+  const { client, calls } = createStubClient();
+  await notePollResult(client, { id: 'd1', status: 'planning' });
+  assert.equal(calls.updateMany.length, 0);
+});
+
+// 型の疎通確認（実行はしない）: DispatchQueryClient が findMany を要求すること。
+function _typeCheckOnly(): DispatchQueryClient {
+  return {
+    async updateMany() {
+      return { count: 0 };
+    },
+    async findUnique() {
+      return null;
+    },
+    async findMany(): Promise<DispatchListRow[]> {
+      return [];
+    },
+  };
+}
+void _typeCheckOnly;

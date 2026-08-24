@@ -139,7 +139,18 @@ done / failed / stopped      ← done:要約＋devlogリンク / stopped:STOP �
 - [x] **D1〜D4**：2ゲート / テンプレ注入 / 入力枠モデル選択 / v1スコープ
 - [ ] tier セット・既定・tier↔model 初期バインド（§6、実装時に現行モデルで確定）
 - [ ] コスト取得経路（core build のコストをどう取るか。ライブ結線は council と同じく後続）
-- [ ] worker の常駐方式の詳細（v1 単一プロセス→pm2 化のタイミング）
+- [x] **worker の常駐方式の詳細**（サイクル1.8 ③-2 で決定）: manager プロセス内の
+  常駐ループ（`setTimeout` 再帰＋`unref()`）＋ `DISPATCH_WORKER_MODE`
+  (`off`|`manual`|`resident`、既定 `off`) による切替。却下案: 外部 cron/systemd
+  timer（プロセス起動・接続管理の二重化、spec本文の「単一プロセスで可」に反する）、
+  Postgres advisory lock によるリーダー選出（Prisma のコネクションプール越しに
+  セッションがリークする上、行レベル CAS があれば多重起動しても安全なため不要）、
+  BullMQ 等のジョブキュー（Redis という新規インフラ依存を持ち込む）。詳細・実装は
+  `apps/server/src/orchestrator/dispatch-worker.ts` および devlog
+  `doc/devlog/2026-08-25_*.md`（サイクル1.8 ③-2）参照。
+- [ ] **（新規）building のポーリングバジェット**: サイクル1.8 ③-2 の実装では
+  本文§4の30分（planning想定）をそのまま building に適用せず120分にした（実ビルド
+  所要時間が未実測のため暫定値）。実測値が得られ次第、正式な値に更新すること。
 
 ---
 

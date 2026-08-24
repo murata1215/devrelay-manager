@@ -145,8 +145,10 @@ export interface SubmitInstructionResult {
 
 export interface GetPlanResult {
   status: string;
-  planMarkdown: string;
-  executable: boolean;
+  // 実測（サイクル1.8 ③-2）: not_found 応答には planMarkdown/executable が無い。
+  // 必須と宣言していたのは誤りだった（manager 側アダプタの型修正。core は変更しない）。
+  planMarkdown?: string;
+  executable?: boolean;
   [key: string]: unknown;
 }
 
@@ -155,9 +157,11 @@ export interface ApproveImplementationResult {
 }
 
 export interface GetBuildStatusResult {
-  phase: string;
-  buildId: string;
-  summary: string;
+  phase?: string;
+  // 実測: 存在しない submissionId でも {"phase":"queued","done":false} が返り、
+  // buildId/summary は含まれない。必須と宣言していたのは誤りだった。
+  buildId?: string;
+  summary?: string;
   done: boolean;
 }
 
