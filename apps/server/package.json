@@ -12,19 +12,21 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "db:studio": "prisma studio",
-    "migrate": "prisma migrate dev"
+    "migrate": "prisma migrate dev",
+    "smoke:core": "tsx scripts/smoke-core.ts"
   },
   "dependencies": {
-    "@prisma/client": "^5.8.0",
-    "fastify": "^4.25.0",
     "@fastify/cors": "^9.0.1",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@prisma/client": "^5.8.0",
     "dotenv": "^16.3.1",
+    "fastify": "^4.25.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "prisma": "^5.8.0",
-    "typescript": "^5.9.3",
     "tsx": "^4.0.0",
-    "@types/node": "^20.0.0"
+    "typescript": "^5.9.3"
   }
 }

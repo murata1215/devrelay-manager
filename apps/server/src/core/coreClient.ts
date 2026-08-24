@@ -1,0 +1,197 @@
+/**
+ * manager → core 接続アダプタ。
+ *
+ * core が提供する MCP（Model Context Protocol）サーバーを localhost 経由で再利用する。
+ * manager は core の機能を再実装せず、常にこのアダプタ越しに参照する（doc/web-manager-surface-concept.md §8 準拠）。
+ *
+ * 接続先はステートレスな StreamableHTTP エンドポイントのため、Mcp-Session-Id は扱わない。
+ * 認証は DEVRELAY_PAT を Bearer トークンとしてリクエストヘッダに付与する。
+ */
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+const CLIENT_NAME = 'devrelay-manager';
+const CLIENT_VERSION = '0.1.0';
+
+let clientPromise: Promise<Client> | null = null;
+
+function getCoreMcpUrl(): string {
+  return process.env.CORE_MCP_URL ?? 'http://127.0.0.1:3005/mcp';
+}
+
+function getPat(): string {
+  const pat = process.env.DEVRELAY_PAT;
+  if (!pat || pat.trim() === '') {
+    // PAT・接続文字列自体はエラーメッセージに含めない
+    throw new Error(
+      'DEVRELAY_PAT が未設定です。apps/server/.env に DEVRELAY_PAT を設定してください。'
+    );
+  }
+  return pat;
+}
+
+async function connect(): Promise<Client> {
+  const url = new URL(getCoreMcpUrl());
+  const pat = getPat();
+
+  const transport = new StreamableHTTPClientTransport(url, {
+    requestInit: {
+      headers: {
+        Authorization: `Bearer ${pat}`,
+      },
+    },
+  });
+
+  const client = new Client({ name: CLIENT_NAME, version: CLIENT_VERSION });
+
+  try {
+    await client.connect(transport);
+  } catch (err) {
+    throw classifyConnectError(err);
+  }
+
+  return client;
+}
+
+/** 接続エラーを原因が分かる形に分類する（PAT・URL 自体はメッセージに含めない）。 */
+function classifyConnectError(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+
+  if (message.includes('401') || message.toLowerCase().includes('unauthorized')) {
+    return new Error(
+      'core MCP への認証に失敗しました（401）。DEVRELAY_PAT が無効か期限切れの可能性があります。'
+    );
+  }
+  if (
+    message.includes('ECONNREFUSED') ||
+    message.includes('ENOTFOUND') ||
+    message.includes('ETIMEDOUT') ||
+    message.includes('fetch failed')
+  ) {
+    return new Error(
+      'core MCP へ到達できませんでした。CORE_MCP_URL・core プロセスの起動状態を確認してください。'
+    );
+  }
+  return new Error(`core MCP への接続でエラーが発生しました: ${message}`);
+}
+
+/** 遅延シングルトン。接続済みクライアントを再利用し、切断が疑われる場合は再接続する。 */
+async function getClient(): Promise<Client> {
+  if (!clientPromise) {
+    clientPromise = connect();
+  }
+  try {
+    return await clientPromise;
+  } catch (err) {
+    // 接続自体に失敗した場合は次回呼び出しで再試行できるようにリセットする
+    clientPromise = null;
+    throw err;
+  }
+}
+
+/** MCP ツールを呼び出し、content[0].text を JSON として返す共通ヘルパ。 */
+async function callTool<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
+  const client = await getClient();
+
+  let result;
+  try {
+    result = await client.callTool({ name, arguments: args });
+  } catch (err) {
+    // ツール呼び出し自体が失敗（接続断など）した場合は再接続できるようリセット
+    clientPromise = null;
+    throw classifyConnectError(err);
+  }
+
+  if (result.isError) {
+    const content = Array.isArray(result.content) ? result.content : [];
+    const text = content
+      .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+      .map((c) => c.text)
+      .join('\n');
+    throw new Error(`core ツール「${name}」がエラーを返しました: ${text || '(詳細不明)'}`);
+  }
+
+  const content = Array.isArray(result.content) ? result.content : [];
+  const textEntry = content.find((c): c is { type: 'text'; text: string } => c.type === 'text');
+  if (!textEntry) {
+    throw new Error(`core ツール「${name}」の応答に text コンテンツがありません。`);
+  }
+
+  try {
+    return JSON.parse(textEntry.text) as T;
+  } catch {
+    throw new Error(`core ツール「${name}」の応答が JSON として解釈できません。`);
+  }
+}
+
+export interface CoreProject {
+  id: string;
+  name: string;
+  path: string;
+  machine: string;
+  machineId: string;
+  online: boolean;
+  aiTool: string;
+}
+
+interface ListProjectsResult {
+  projects: CoreProject[];
+}
+
+export interface SubmitInstructionResult {
+  submissionId: string;
+  status: string;
+}
+
+export interface GetPlanResult {
+  status: string;
+  planMarkdown: string;
+  executable: boolean;
+  [key: string]: unknown;
+}
+
+export interface ApproveImplementationResult {
+  phase: string;
+}
+
+export interface GetBuildStatusResult {
+  phase: string;
+  buildId: string;
+  summary: string;
+  done: boolean;
+}
+
+/** core が把握している全プロジェクトを取得する（online フラグ含む）。 */
+export async function listProjects(): Promise<CoreProject[]> {
+  const result = await callTool<ListProjectsResult>('list_projects', {});
+  return result.projects;
+}
+
+/** 対象プロジェクトへ指示を投入する。 */
+export async function submitInstruction(
+  projectId: string,
+  instruction: string
+): Promise<SubmitInstructionResult> {
+  return callTool<SubmitInstructionResult>('submit_instruction', { projectId, instruction });
+}
+
+/** submission に紐づくプランを取得する。 */
+export async function getPlan(submissionId: string): Promise<GetPlanResult> {
+  return callTool<GetPlanResult>('get_plan', { submissionId });
+}
+
+/** プランを承認し実装フェーズへ進める。 */
+export async function approveImplementation(
+  projectId: string,
+  submissionId: string
+): Promise<ApproveImplementationResult> {
+  return callTool<ApproveImplementationResult>('approve_implementation', {
+    projectId,
+    submissionId,
+  });
+}
+
+/** ビルド状況を取得する。 */
+export async function getBuildStatus(submissionId: string): Promise<GetBuildStatusResult> {
+  return callTool<GetBuildStatusResult>('get_build_status', { submissionId });
+}
