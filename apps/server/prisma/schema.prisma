@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// 横断スレ本体。1つの Thread が複数リポジトリへの Dispatch を束ねる会話単位。
+model Thread {
+  id        String    @id @default(cuid())
+  title     String
+  ownerId   String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  messages  Message[]
+  dispatches Dispatch[]
+}
+
+/// スレッド内の会話ログ（1メッセージ=1行、更新は想定しない）。
+model Message {
+  id        String   @id @default(cuid())
+  threadId  String
+  thread    Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  role      String   // 'user' | 'manager'
+  content   String
+  createdAt DateTime @default(now())
+
+  dispatches Dispatch[]
+
+  @@index([threadId])
+}
+
+/// per-repo ビルドへの参照＝監査の原子。
+/// 権威データ（実 build・監査ログ）は core 側に残り、ここは参照（projectId/submissionId/buildId）とスレ文脈のみを持つ。
+model Dispatch {
+  id           String   @id @default(cuid())
+  threadId     String
+  thread       Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  messageId    String?
+  message      Message? @relation(fields: [messageId], references: [id])
+  projectId    String
+  submissionId String?
+  buildId      String?
+  status       String   @default("pending") // 'pending' | 'planning' | 'awaiting_approval' | 'building' | 'done' | 'failed' | 'stopped'
+  devlogPath   String?
+  cost         Float?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([threadId])
+  @@index([messageId])
+  @@index([projectId])
+}

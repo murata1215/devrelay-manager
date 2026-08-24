@@ -1,0 +1,15 @@
+{
+  "name": "devrelay-manager",
+  "private": true,
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "prisma",
+      "@prisma/client",
+      "@prisma/engines"
+    ]
+  }
+}
