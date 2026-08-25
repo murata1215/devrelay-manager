@@ -11,9 +11,13 @@ function settings() {
     version: 1,
     defaultTier: 'standard',
     tierModels: {
-      heavy: { model: 'claude-opus-5', label: 'Heavy' },
-      standard: { model: 'claude-sonnet-5', label: 'Standard' },
-      light: { model: 'claude-haiku-4-5-20251001', label: 'Light' },
+      heavy: { model: 'claude-opus-5', label: 'Heavy', idForm: 'pinned-dateless', note: 'test note heavy' },
+      standard: { model: 'claude-sonnet-5', label: 'Standard', idForm: 'pinned-dateless', note: 'test note standard' },
+      light: { model: 'claude-haiku-4-5-20251001', label: 'Light', idForm: 'pinned-dated', note: 'test note light' },
+    },
+    modelIdSource: {
+      url: 'https://platform.claude.com/docs/en/about-claude/models/overview',
+      checkedAt: '2026-08-26',
     },
     governance: {
       requiredClauses: ['AskUserQuestion禁止', 'devlog', 'STOP'],

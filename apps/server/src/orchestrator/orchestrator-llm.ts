@@ -13,8 +13,10 @@
  *    core/coreClient.js / db/client.js。
  *    プロジェクト候補（ProjectCandidate[]）は呼び出し側（routes/orchestrator.ts）が
  *    core から取得してデータとして渡す。この層は core RPC を一切呼ばない。
- * 3. テスト: orchestrator-llm.test.ts の構造テストが、この層の全ファイルの
- *    ソース文字列に禁止 import が無いことを機械検証する。
+ * 3. テスト: orchestrator-llm-structure.test.ts の構造テストが、この層から相対 import を
+ *    辿った推移閉包の全ファイルに禁止 import が無いことを AST で機械検証する
+ *    （サイクル1.12 で正規表現から TypeScript Compiler API による AST 解析へ強化。
+ *    副作用 import・動的 import()・require() も検出する）。
  *
  * 加えて spec §9「発話は常に提案。純粋な会話は Dispatch を作らない」を安全網として
  * 実装する：kind:'conversation' の場合は draft.createDraft を一切呼ばない。

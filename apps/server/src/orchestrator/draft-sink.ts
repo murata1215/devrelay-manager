@@ -9,7 +9,8 @@
  * updateMany / findUnique（dispatch-store.ts の DispatchClient が持つ遷移用メソッド）は
  * この interface に一切含まれない。orchestrator-llm.ts はこのファイルの型しか import
  * しないため、transitionDispatch 等の遷移関数へ到達する手段を型として持たない
- * （import 禁止リストの検証は orchestrator-llm.test.ts の構造テストで機械確認する）。
+ * （import 禁止リストの検証は orchestrator-llm-structure.test.ts の構造テスト（AST・
+ * 推移閉包）で機械確認する）。
  *
  * dispatch-store.ts / dispatch-state.ts / dispatch-gates.ts は無変更（③-1/③-2 非改変）。
  */

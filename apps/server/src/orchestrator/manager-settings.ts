@@ -21,9 +21,19 @@ import { z } from 'zod';
 import { TIERS } from './tier.js';
 import type { Tier } from './tier.js';
 
+/**
+ * idForm はサイクル1.12 で追加。モデルIDが「日付付きpinnedスナップショット」か
+ * 「日付なし（4.6世代以降）だがそれ自体がpinnedスナップショット」かを区別して記録する。
+ * 参照: https://platform.claude.com/docs/en/about-claude/models/overview
+ * 「Every Claude model ID is a pinned snapshot, including the dateless IDs used
+ * from the 4.6 generation on.」— つまり日付なしだから将来差し替わる別名、というわけではない。
+ * note は推測でモデルIDを書いていないことの根拠を人間が読める形で必須記録するためのもの。
+ */
 const tierModelEntrySchema = z.object({
   model: z.string().min(1, 'tierModels の model は空文字にできません。'),
   label: z.string().min(1, 'tierModels の label は空文字にできません。'),
+  idForm: z.enum(['pinned-dated', 'pinned-dateless']),
+  note: z.string().min(1, 'tierModels の note は空文字にできません（出所の記録を必須にする）。'),
 });
 
 const managerSettingsSchema = z.object({
@@ -33,6 +43,11 @@ const managerSettingsSchema = z.object({
     heavy: tierModelEntrySchema,
     standard: tierModelEntrySchema,
     light: tierModelEntrySchema,
+  }),
+  /** モデルID一次情報の出所。推測で埋めていないことを構造として残す（サイクル1.12）。 */
+  modelIdSource: z.object({
+    url: z.string().min(1),
+    checkedAt: z.string().min(1),
   }),
   governance: z.object({
     requiredClauses: z.array(z.string().min(1)).min(1),
