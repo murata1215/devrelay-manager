@@ -28,6 +28,12 @@ model Message {
   role      String // 'user' | 'manager'
   content   String
   createdAt DateTime @default(now())
+  /// サイクル1.11 ③-3: doc/orchestrator-layer3-design.md §6 D3「選択値は Dispatch と
+  /// Message に記録」に基づく加算列。orchestrator LLM 層が resolveTier/resolveModel で
+  /// 決定した値を任意で記録する（旧行は null のまま。値は tier.ts / manager-settings.ts の
+  /// 権威が唯一の正）。
+  tier      String?
+  model     String?
 
   dispatches Dispatch[]
 
@@ -55,6 +61,13 @@ model Dispatch {
   lastPolledAt    DateTime?
   devlogPath      String?
   cost            Float?
+  /// サイクル1.11 ③-3: doc/orchestrator-layer3-design.md §6 D3「選択値は Dispatch と
+  /// Message に記録（監査・コスト按分のため）」に基づく加算列。orchestrator LLM 層
+  /// （draft-sink.ts の DraftSink.createDraft）が draft 作成時にのみ書き込む。
+  /// status とは独立な列であり、この列を書けることは遷移権限を意味しない
+  /// （DraftSink には updateMany が存在しないため、以後の更新経路はここには無い）。
+  tier            String?
+  model           String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

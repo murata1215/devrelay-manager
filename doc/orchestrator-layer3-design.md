@@ -137,8 +137,20 @@ done / failed / stopped      ← done:要約＋devlogリンク / stopped:STOP �
 - [x] **§10-1 承認待ち**：無期限保留 ＋ 承認時 staleCheck（`stale` 状態追加）
 - [x] **§10-2 repo 推定**：list_projects(online)＋名前/別名マッチ＋文脈、低確信は複数候補
 - [x] **D1〜D4**：2ゲート / テンプレ注入 / 入力枠モデル選択 / v1スコープ
-- [ ] tier セット・既定・tier↔model 初期バインド（§6、実装時に現行モデルで確定）
-- [ ] コスト取得経路（core build のコストをどう取るか。ライブ結線は council と同じく後続）
+- [x] **tier セット・既定・tier↔model 初期バインド**（サイクル1.11 ③-3 で決定・実装）:
+  3 tier（Heavy/Standard/Light）、既定 Standard、v1 ルーティング3規則
+  （plan→standard / exec→heavy / background→light、`tier.ts` の `resolveTier` が唯一の権威）。
+  tier→model の束ねは `config/manager-settings.json` の `tierModels`
+  （Heavy=`claude-opus-5` / Standard=`claude-sonnet-5` / Light=`claude-haiku-4-5-20251001`、
+  2026-08-26 時点で Anthropic 公式ドキュメントを確認して確定。推測では書いていない）。
+  詳細・実装は `apps/server/src/orchestrator/tier.ts` / `manager-settings.ts` および devlog
+  `doc/devlog/2026-08-2*_*.md`（サイクル1.11 ③-3）参照。
+- [x] **コスト取得経路**（サイクル1.11 ③-3 で決定のみ・ライブ結線は非スコープ）:
+  core の `get_build_status` 応答にコスト情報が無いことをサイクル1.10 の実測で確認済みのため、
+  (a) orchestrator LLM 自身の usage を manager 側で記録する経路と (b) core build のコストを
+  core 側監査ログから後追いする経路に分離。(b) のライブ結線は council 実結線（層⑤）と
+  同じタイミングまで遅延する。型のみ `apps/server/src/orchestrator/cost.ts` に定義済み、
+  呼び出し側は未実装。
 - [x] **worker の常駐方式の詳細**（サイクル1.8 ③-2 で決定）: manager プロセス内の
   常駐ループ（`setTimeout` 再帰＋`unref()`）＋ `DISPATCH_WORKER_MODE`
   (`off`|`manual`|`resident`、既定 `off`) による切替。却下案: 外部 cron/systemd

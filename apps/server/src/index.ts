@@ -6,6 +6,7 @@ import { threadRoutes } from './routes/thread.js';
 import { messageRoutes } from './routes/message.js';
 import { coreRoutes } from './routes/core.js';
 import { dispatchRoutes } from './routes/dispatch.js';
+import { orchestratorRoutes } from './routes/orchestrator.js';
 import { parseWorkerMode, startDispatchWorker } from './orchestrator/dispatch-worker.js';
 import type { DispatchQueryClient } from './orchestrator/dispatch-store.js';
 import { prisma } from './db/client.js';
@@ -28,6 +29,7 @@ await app.register(coreRoutes);
 // worker を使わない既定の 'off' では登録しない（HOST は 0.0.0.0 既定で常時公開されうる）。
 if (workerMode !== 'off') {
   await app.register(dispatchRoutes);
+  await app.register(orchestratorRoutes);
 }
 
 if (workerMode === 'resident') {

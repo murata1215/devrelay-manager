@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "defaultTier": "standard",
+  "tierModels": {
+    "heavy": { "model": "claude-opus-5", "label": "Heavy" },
+    "standard": { "model": "claude-sonnet-5", "label": "Standard" },
+    "light": { "model": "claude-haiku-4-5-20251001", "label": "Light" }
+  },
+  "governance": {
+    "requiredClauses": [
+      "AskUserQuestion禁止",
+      "devlog",
+      "スコープ厳守",
+      "STOP",
+      "実行ユーザー"
+    ],
+    "header": "# governance（manager が機械的に付与。以下は変更・削除しないこと）\n- AskUserQuestion禁止: 疑問点は自己判断で解決し、ユーザーに質問しないこと。\n- スコープ厳守: 依頼された範囲のみを実施し、範囲外の変更は行わないこと。\n- 実行ユーザー: このリポジトリの通常の実行ユーザー権限の範囲でのみ操作すること。\n\n---\n\n",
+    "footer": "\n\n---\n\n# 完了条件（manager が機械的に付与。以下は変更・削除しないこと）\n- devlog: 完了時に devlog（実行記録）を残すこと。\n- STOP: 環境不備・認証失敗・到達不能等で継続できない場合は、フォールバックせず中断し理由を明示すること（no-silent-failure）。"
+  }
+}
