@@ -1,5 +1,5 @@
 /**
- * orchestrator LLM 層の API（サイクル1.11 ③-3）。
+ * orchestrator LLM 層の API（サイクル1.11 ③-3 → サイクル1.13 で実LLM結線）。
  *
  * このルートは core から候補プロジェクトを取得して orchestrate() へデータとして渡す
  * （orchestrator-llm.ts 自体は coreClient を import しない。境界の詳細は
@@ -11,18 +11,30 @@
  * 【注意】manager 側の認証はまだ実装していない（層⑤で対応予定。routes/dispatch.ts と
  * 同じ注意）。このためこのルートも DISPATCH_WORKER_MODE !== 'off' のときのみ登録する
  * （index.ts 参照）。
+ *
+ * 【サイクル1.13】ANTHROPIC_API_KEY 未設定時は 503「未結線」を返す（自動フォールバック無し）。
+ * SDK を直接扱うのは llm/anthropic-llm.ts のみで、このファイルは MessagesCreateClient /
+ * LlmPort という narrow port しか触らない。クライアントは遅延シングルトン
+ * （coreClient.ts の getPat() と同じパターン）でプロセス内キャッシュする。
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db/client.js';
 import * as coreClient from '../core/coreClient.js';
 import { orchestrate } from '../orchestrator/orchestrator-llm.js';
-import type { LlmPort, OrchestrateDeps } from '../orchestrator/orchestrator-llm.js';
+import type { OrchestrateDeps } from '../orchestrator/orchestrator-llm.js';
 import { prismaDraftSink } from '../orchestrator/draft-sink.js';
 import type { DraftCreateClient } from '../orchestrator/draft-sink.js';
 import { readManagerSettingsFile } from '../orchestrator/manager-settings.js';
+import type { ManagerSettings } from '../orchestrator/manager-settings.js';
 import { parseTier, parseIntent } from '../orchestrator/tier.js';
 import type { Tier, Intent } from '../orchestrator/tier.js';
+import {
+  anthropicClientFromEnv,
+  createAnthropicLlm,
+  describeAnthropicError,
+} from '../llm/anthropic-llm.js';
+import type { MessagesCreateClient } from '../llm/anthropic-llm.js';
 
 const orchestrateSchema = z.object({
   content: z.string().min(1),
@@ -31,17 +43,19 @@ const orchestrateSchema = z.object({
 });
 
 /**
- * 実 LLM クライアントは本サイクル非スコープ（新規依存が要るため。cycle 1.11 devlog参照）。
- * 未結線であることをサイレントに隠さず、呼ばれたら明示的に throw する（no-silent-failure）。
+ * ANTHROPIC_API_KEY はプロセス起動後に変わらない前提で遅延キャッシュする
+ * （coreClient.ts のクライアント遅延生成パターンを踏襲）。null は「鍵未設定」を表し、
+ * 呼び出しのたびに再チェックしない（都度 process.env を読むと鍵未設定時のホットパスで
+ * 無駄な分岐が増えるだけで意味がない。値が実行中に変わる運用は想定しない）。
  */
-const unconfiguredLlm: LlmPort = {
-  async complete(): Promise<string> {
-    throw new Error(
-      '実 LLM クライアントが未結線です（サイクル1.11 ③-3 では意図的に非スコープ）。' +
-        'LlmPort の実装を index.ts 側で注入してください。'
-    );
-  },
-};
+let cachedClient: MessagesCreateClient | null | undefined;
+
+function anthropicClient(timeoutMs: number): MessagesCreateClient | null {
+  if (cachedClient === undefined) {
+    cachedClient = anthropicClientFromEnv(timeoutMs);
+  }
+  return cachedClient;
+}
 
 function managerRepoPath(): string {
   return process.env.MANAGER_REPO_PATH ?? process.cwd();
@@ -75,17 +89,27 @@ export async function orchestratorRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: message });
       }
 
-      const message = await prisma.message.create({
-        data: { threadId: request.params.threadId, role: 'user', content: parsed.data.content },
-      });
-
-      let settings;
+      // 副作用（Message 行の作成）の前に、副作用の無い前提チェックを済ませる
+      // （サイクル1.13: 従来は message.create の後に検証していたため、503 のたびに
+      // 孤児の user Message 行が残っていた。この並べ替えでその問題を解消する）。
+      let settings: ManagerSettings;
       try {
         settings = readManagerSettingsFile();
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         return reply.status(503).send({ error: `manager Settings の読み込みに失敗しました: ${detail}` });
       }
+
+      const client = anthropicClient(settings.llm.timeoutMs);
+      if (!client) {
+        return reply.status(503).send({
+          error: 'ANTHROPIC_API_KEY が未設定です（.env に設定してください）。自動フォールバックはしません。',
+        });
+      }
+
+      const message = await prisma.message.create({
+        data: { threadId: request.params.threadId, role: 'user', content: parsed.data.content },
+      });
 
       const projects = await coreClient.listProjects();
       const candidates = projects.map((p) => ({
@@ -97,7 +121,7 @@ export async function orchestratorRoutes(app: FastifyInstance) {
       }));
 
       const deps: OrchestrateDeps = {
-        llm: unconfiguredLlm,
+        llm: createAnthropicLlm(client, settings.llm.maxTokens),
         draft: prismaDraftSink(prisma.dispatch as unknown as DraftCreateClient),
         settings,
       };
@@ -114,7 +138,7 @@ export async function orchestratorRoutes(app: FastifyInstance) {
         });
         return reply.status(200).send({ messageId: message.id, result });
       } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
+        const detail = describeAnthropicError(err);
         return reply.status(503).send({ error: `orchestrate に失敗しました: ${detail}` });
       }
     }

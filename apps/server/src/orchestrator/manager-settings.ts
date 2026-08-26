@@ -49,6 +49,16 @@ const managerSettingsSchema = z.object({
     url: z.string().min(1),
     checkedAt: z.string().min(1),
   }),
+  /**
+   * サイクル1.13 実LLM結線: Anthropic API 呼び出しの実行パラメータ。マジックナンバーに
+   * せず、1.12 の起動時検証（index.ts）がそのまま効くよう Settings に持たせる。
+   * timeoutMs: 60000 は「60秒でタイムアウトし1回で諦める」という要求値そのもの
+   * （llm/anthropic-llm.ts の anthropicClientFromEnv で maxRetries:0 と組み合わせて使う）。
+   */
+  llm: z.object({
+    timeoutMs: z.number().int().positive('llm.timeoutMs は正の整数にしてください。'),
+    maxTokens: z.number().int().positive('llm.maxTokens は正の整数にしてください。'),
+  }),
   governance: z.object({
     requiredClauses: z.array(z.string().min(1)).min(1),
     header: z.string(),

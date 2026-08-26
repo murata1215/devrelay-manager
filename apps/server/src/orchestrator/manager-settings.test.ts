@@ -23,6 +23,7 @@ function validRaw() {
       url: 'https://platform.claude.com/docs/en/about-claude/models/overview',
       checkedAt: '2026-08-26',
     },
+    llm: { timeoutMs: 60000, maxTokens: 8192 },
     governance: {
       requiredClauses: ['AskUserQuestion禁止', 'devlog', 'STOP'],
       header: '# header AskUserQuestion禁止\n',
@@ -95,4 +96,14 @@ test('109. tierModels: 実 config の各 tier が idForm/note を持ち、modelI
   assert.equal(settings.tierModels.light.idForm, 'pinned-dated');
   assert.ok(settings.modelIdSource.url.includes('platform.claude.com'));
   assert.ok(settings.modelIdSource.checkedAt.length > 0);
+});
+
+test('121. tierModels/llm: 実 config の llm.timeoutMs が60000（60秒・1回で諦める要求値）、llm 欠落は zod が reject する（サイクル1.13）', () => {
+  const settings = readManagerSettingsFile(COMMITTED_CONFIG_PATH);
+  assert.equal(settings.llm.timeoutMs, 60000);
+  assert.ok(settings.llm.maxTokens > 0);
+
+  const raw = validRaw() as Record<string, unknown>;
+  delete raw.llm;
+  assert.throws(() => loadManagerSettings(raw));
 });

@@ -29,6 +29,12 @@ app.log.info(`DISPATCH_WORKER_MODE=${workerMode}`);
 try {
   const managerSettings = readManagerSettingsFile();
   app.log.info(`manager settings loaded: tiers=${Object.keys(managerSettings.tierModels).join(',')}`);
+  // サイクル1.13: 鍵の有無のみをログに出す（値は絶対に出さない）。未設定でも起動は止めない
+  // ——orchestrate ルートがリクエスト時に 503「未結線」を返す設計（core/coreClient.ts の
+  // DEVRELAY_PAT と同様の扱い）。
+  app.log.info(
+    `ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY ? 'set' : 'unset (orchestrate は503を返します)'}`
+  );
 } catch (err) {
   app.log.error(err);
   app.log.error(

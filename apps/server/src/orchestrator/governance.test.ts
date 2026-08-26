@@ -16,6 +16,7 @@ function settings() {
       url: 'https://platform.claude.com/docs/en/about-claude/models/overview',
       checkedAt: '2026-08-26',
     },
+    llm: { timeoutMs: 60000, maxTokens: 8192 },
     governance: {
       requiredClauses: ['AskUserQuestion禁止', 'devlog', 'STOP'],
       header: '===HEADER=== AskUserQuestion禁止\n',

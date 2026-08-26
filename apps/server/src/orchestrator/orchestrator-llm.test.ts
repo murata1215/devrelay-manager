@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { orchestrate } from './orchestrator-llm.js';
-import type { LlmPort, OrchestrateDeps } from './orchestrator-llm.js';
+import type { LlmPort, LlmCompletion, OrchestrateDeps } from './orchestrator-llm.js';
 import type { DraftSink, DraftCreateInput, CreatedDraft } from './draft-sink.js';
 import { loadManagerSettings } from './manager-settings.js';
 import type { ProjectCandidate } from './project-proposal.js';
@@ -19,6 +19,7 @@ function settings() {
       url: 'https://platform.claude.com/docs/en/about-claude/models/overview',
       checkedAt: '2026-08-26',
     },
+    llm: { timeoutMs: 60000, maxTokens: 8192 },
     governance: {
       requiredClauses: ['AskUserQuestion禁止', 'devlog', 'STOP'],
       header: '===HEADER=== AskUserQuestion禁止\n',
@@ -34,8 +35,18 @@ function candidates(): ProjectCandidate[] {
   ];
 }
 
-function llmReturning(raw: string): LlmPort {
-  return { complete: async () => raw };
+/**
+ * サイクル1.13: LlmPort.complete は LlmCompletion（text/model/usage）を返すよう拡張された。
+ * 既存テストは raw JSON 文字列のみに関心があるため、usage/model は固定のダミー値を返す
+ * ヘルパーとして維持する（既存アサーションは変更しない）。
+ */
+function llmReturning(raw: string, overrides: Partial<Omit<LlmCompletion, 'text'>> = {}): LlmPort {
+  const completion: LlmCompletion = {
+    text: raw,
+    model: overrides.model ?? 'claude-sonnet-5',
+    usage: overrides.usage ?? { inputTokens: 111, outputTokens: 222 },
+  };
+  return { complete: async () => completion };
 }
 
 function recordingSink(): { sink: DraftSink; calls: DraftCreateInput[] } {
@@ -156,5 +167,46 @@ test('95. orchestrate: 自己ループ候補が proposal の candidates に警�
   if (result.kind === 'proposal') {
     assert.equal(result.candidates[0].selfLoopWarning, true);
     assert.ok(result.candidates[0].warningText && result.candidates[0].warningText.length > 0);
+  }
+});
+
+test('117. orchestrate: proposal 時に inputTokens/outputTokens/responseModel が createDraft に渡り、結果にも usage/responseModel が含まれる（サイクル1.13 実LLM結線）', async () => {
+  const { sink, calls } = recordingSink();
+  const deps: OrchestrateDeps = {
+    llm: llmReturning(
+      JSON.stringify({ kind: 'dispatch', projectId: 'proj-1', body: 'READMEを更新して' }),
+      { model: 'claude-opus-5', usage: { inputTokens: 321, outputTokens: 654 } }
+    ),
+    draft: sink,
+    settings: settings(),
+  };
+  const result = await orchestrate(deps, baseInput());
+  assert.equal(result.kind, 'proposal');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].inputTokens, 321);
+  assert.equal(calls[0].outputTokens, 654);
+  assert.equal(calls[0].responseModel, 'claude-opus-5');
+  if (result.kind === 'proposal') {
+    assert.deepEqual(result.usage, { inputTokens: 321, outputTokens: 654 });
+    assert.equal(result.responseModel, 'claude-opus-5');
+  }
+});
+
+test('118. orchestrate: conversation 時も usage/responseModel を結果に含むが createDraft は0回のまま（spec §9 の安全網は不変・サイクル1.13）', async () => {
+  const { sink, calls } = recordingSink();
+  const deps: OrchestrateDeps = {
+    llm: llmReturning(
+      JSON.stringify({ kind: 'conversation', reply: 'こんにちは' }),
+      { model: 'claude-haiku-4-5-20251001', usage: { inputTokens: 10, outputTokens: 20 } }
+    ),
+    draft: sink,
+    settings: settings(),
+  };
+  const result = await orchestrate(deps, baseInput());
+  assert.equal(result.kind, 'conversation');
+  assert.equal(calls.length, 0);
+  if (result.kind === 'conversation') {
+    assert.deepEqual(result.usage, { inputTokens: 10, outputTokens: 20 });
+    assert.equal(result.responseModel, 'claude-haiku-4-5-20251001');
   }
 });

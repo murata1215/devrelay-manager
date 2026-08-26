@@ -19,6 +19,7 @@
     "test": "sh -c 'files=$(find src -name \"*.test.ts\" | sort); [ -n \"$files\" ] || { echo \"no test files found\" >&2; exit 1; }; exec node --import tsx --test $files'"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "@fastify/cors": "^9.0.1",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@prisma/client": "^5.8.0",

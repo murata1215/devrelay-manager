@@ -68,6 +68,14 @@ model Dispatch {
   /// （DraftSink には updateMany が存在しないため、以後の更新経路はここには無い）。
   tier            String?
   model           String?
+  /// サイクル1.13 実LLM結線: orchestrator LLM 呼び出しの usage 記録（記録のみ。集計は非
+  /// スコープ）。旧行は null のまま。status とは独立な列であり、この列を書けることは
+  /// 遷移権限を意味しない（draft-sink.ts の DraftSink.createDraft が draft 作成時にのみ
+  /// 書き込む。以後の更新経路はここには無い）。
+  inputTokens     Int?
+  outputTokens    Int?
+  /// API が実際に使用したと申告したモデルID（要求値の model 列との突き合わせ用）。
+  responseModel   String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

@@ -33,9 +33,28 @@ import { annotateCandidates } from './project-proposal.js';
 import type { ProjectCandidate, AnnotatedCandidate } from './project-proposal.js';
 import type { DraftSink } from './draft-sink.js';
 
-/** LLM 呼び出しの注入ポート。実クライアントの結線は本サイクル非スコープ（devlog参照）。 */
+/** LLM 呼び出しの usage（トークン数）。記録のみ・集計は非スコープ（サイクル1.13）。 */
+export interface LlmUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/**
+ * LLM 呼び出し結果。text は今までどおり zod で厳格検証する対象、model は API が
+ * 実際に使用したと申告したモデルID（要求値 = resolveModel の結果との突き合わせ用）。
+ */
+export interface LlmCompletion {
+  text: string;
+  model: string;
+  usage: LlmUsage;
+}
+
+/**
+ * LLM 呼び出しの注入ポート。実クライアントは apps/server/src/llm/anthropic-llm.ts
+ * （サイクル1.13 実LLM結線）。この層は SDK を import せず、この interface だけを知る。
+ */
 export interface LlmPort {
-  complete(request: { model: string; system: string; user: string }): Promise<string>;
+  complete(request: { model: string; system: string; user: string }): Promise<LlmCompletion>;
 }
 
 export interface OrchestrateDeps {
@@ -56,7 +75,7 @@ export interface OrchestrateInput {
 }
 
 export type OrchestrateResult =
-  | { kind: 'conversation'; reply: string }
+  | { kind: 'conversation'; reply: string; usage: LlmUsage; responseModel: string }
   | {
       kind: 'proposal';
       draftId: string;
@@ -65,6 +84,8 @@ export type OrchestrateResult =
       tier: Tier;
       model: string;
       instruction: string;
+      usage: LlmUsage;
+      responseModel: string;
     }
   | { kind: 'invalid'; issues: string[] };
 
@@ -123,20 +144,25 @@ function buildSystemPrompt(candidates: readonly ProjectCandidate[]): string {
 export async function orchestrate(deps: OrchestrateDeps, input: OrchestrateInput): Promise<OrchestrateResult> {
   const annotated = annotateCandidates(input.candidates, input.managerRepoPath);
 
-  const raw = await deps.llm.complete({
+  const completion = await deps.llm.complete({
     model: resolveModel(resolveTier(input.intent ?? null, input.tierOverride ?? null), deps.settings),
     system: buildSystemPrompt(input.candidates),
     user: input.content,
   });
 
-  const parsed = parseLlmOutput(raw);
+  const parsed = parseLlmOutput(completion.text);
   if (!parsed.ok) {
     return { kind: 'invalid', issues: parsed.issues };
   }
 
   if (parsed.value.kind === 'conversation') {
     // spec §9 の安全網: 純粋な会話は draft を一切作らない。
-    return { kind: 'conversation', reply: parsed.value.reply };
+    return {
+      kind: 'conversation',
+      reply: parsed.value.reply,
+      usage: completion.usage,
+      responseModel: completion.model,
+    };
   }
 
   const { projectId, intent, body } = parsed.value;
@@ -160,6 +186,9 @@ export async function orchestrate(deps: OrchestrateDeps, input: OrchestrateInput
     instruction,
     tier,
     model,
+    inputTokens: completion.usage.inputTokens,
+    outputTokens: completion.usage.outputTokens,
+    responseModel: completion.model,
   });
 
   return {
@@ -170,5 +199,7 @@ export async function orchestrate(deps: OrchestrateDeps, input: OrchestrateInput
     tier,
     model,
     instruction,
+    usage: completion.usage,
+    responseModel: completion.model,
   };
 }

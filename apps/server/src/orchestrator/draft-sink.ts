@@ -24,6 +24,14 @@ export interface DraftCreateInput {
   instruction: string;
   tier: Tier;
   model: string;
+  /**
+   * サイクル1.13 実LLM結線: orchestrator LLM 呼び出しの usage（記録のみ・集計は非スコープ）。
+   * 未結線時（テスト等）は省略可能。省略時は Prisma の nullable 列に null が入る。
+   */
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  /** API が実際に使用したと申告したモデルID（要求値 model との突き合わせ用）。 */
+  responseModel?: string | null;
 }
 
 export interface CreatedDraft {
@@ -43,6 +51,9 @@ interface DispatchCreateArgs {
     instruction: string;
     tier: string;
     model: string;
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    responseModel?: string | null;
   };
 }
 
@@ -70,6 +81,9 @@ export function prismaDraftSink(client: DraftCreateClient): DraftSink {
           instruction: input.instruction,
           tier: input.tier,
           model: input.model,
+          inputTokens: input.inputTokens ?? null,
+          outputTokens: input.outputTokens ?? null,
+          responseModel: input.responseModel ?? null,
         },
       });
       return { id: row.id };

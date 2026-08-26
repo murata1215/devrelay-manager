@@ -46,6 +46,9 @@ const FORBIDDEN_SPECIFIER_FRAGMENTS = [
   'dispatch-worker',
   'coreClient',
   'db/client',
+  // サイクル1.13: LLM 層は @anthropic-ai/sdk を直接 import しない（SDK を扱うのは
+  // src/llm/anthropic-llm.ts のみ。この層は LlmPort インターフェースしか知らない）。
+  '@anthropic-ai/sdk',
 ];
 
 interface ScanResult {
@@ -228,4 +231,11 @@ test('108. scanModuleSpecifiers: 実ファイル governance.ts のソースに3�
     hits.length >= 3,
     `実ファイルへの混入3形式が全て検出されていません（検出数: ${hits.length}）。`
   );
+});
+
+test('120. scanModuleSpecifiers: @anthropic-ai/sdk の import を混入させた合成ソースが検出される（サイクル1.13 実LLM結線。実閉包は #99 でグリーンのまま）', () => {
+  const source = `import Anthropic from '@anthropic-ai/sdk';\nexport const x = 1;\n`;
+  const { specifiers } = scanModuleSpecifiers(source);
+  const hits = findForbidden(specifiers);
+  assert.ok(hits.length > 0, '@anthropic-ai/sdk の import が検出されていません。');
 });

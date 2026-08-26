@@ -41,3 +41,29 @@ test('89. prismaDraftSink: create の返り値 id が createDraft の戻り値�
   });
   assert.equal(result.id, 'dispatch-xyz');
 });
+
+test('119. prismaDraftSink: usage 3列（inputTokens/outputTokens/responseModel）が create の data に載り、それでも status は載らない（サイクル1.13）', async () => {
+  let capturedData: Record<string, unknown> | undefined;
+  const stubClient: DraftCreateClient = {
+    async create(args) {
+      capturedData = args.data as unknown as Record<string, unknown>;
+      return { id: 'dispatch-usage-1' };
+    },
+  };
+  const sink = prismaDraftSink(stubClient);
+  await sink.createDraft({
+    threadId: 't1',
+    projectId: 'p1',
+    instruction: '本文',
+    tier: 'standard',
+    model: 'claude-sonnet-5',
+    inputTokens: 100,
+    outputTokens: 200,
+    responseModel: 'claude-sonnet-5',
+  });
+  assert.ok(capturedData);
+  assert.equal(capturedData?.inputTokens, 100);
+  assert.equal(capturedData?.outputTokens, 200);
+  assert.equal(capturedData?.responseModel, 'claude-sonnet-5');
+  assert.equal('status' in (capturedData as object), false);
+});
