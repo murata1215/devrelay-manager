@@ -24,9 +24,28 @@ import {
 import { tick, reconcileOrphans } from '../orchestrator/dispatch-worker.js';
 import * as coreClient from '../core/coreClient.js';
 import { readManagerSettingsFile } from '../orchestrator/manager-settings.js';
+import {
+  serializeDispatch,
+  listThreadDispatches,
+  listThreadDispatchesHttpStatus,
+} from '../orchestrator/dispatch-view.js';
+import type {
+  DispatchDetail,
+  ThreadReadClient,
+  ThreadDispatchListClient,
+} from '../orchestrator/dispatch-view.js';
 
 /** prisma.dispatch を dispatch-store / dispatch-gates / dispatch-worker が要求する構造的インターフェースへ橋渡しする。 */
 const dispatchClient = prisma.dispatch as unknown as DispatchClient & DispatchQueryClient;
+
+/**
+ * prisma.thread / prisma.dispatch を dispatch-view.ts が要求する narrow 型へ橋渡しする。
+ * dispatchClient（DispatchClient & DispatchQueryClient）との交差型は作らない —
+ * findMany のシグネチャが worker 用（take 必須・orderBy 配列）と一覧用（orderBy 単一）で
+ * 異なり、交差させるとオーバーロード解決が壊れるため別 const にする。
+ */
+const threadReadClient = prisma.thread as unknown as ThreadReadClient;
+const dispatchListClient = prisma.dispatch as unknown as ThreadDispatchListClient;
 
 const gateCore = {
   listProjects: coreClient.listProjects,
@@ -49,8 +68,23 @@ export async function dispatchRoutes(app: FastifyInstance) {
     if (!row) {
       return reply.status(404).send({ error: 'dispatch not found' });
     }
-    return row;
+    return serializeDispatch(row as unknown as DispatchDetail);
   });
+
+  // サイクル1.16 ④-1: スレッドのタイムライン表示用（次サイクル1.17 フロントが使う）。
+  app.get<{ Params: { threadId: string } }>(
+    '/threads/:threadId/dispatches',
+    async (request, reply) => {
+      const result = await listThreadDispatches(
+        { threads: threadReadClient, dispatches: dispatchListClient },
+        request.params.threadId
+      );
+      if (!result.ok) {
+        return reply.status(listThreadDispatchesHttpStatus(result)).send({ error: result.reason });
+      }
+      return reply.status(200).send({ dispatches: result.dispatches });
+    }
+  );
 
   app.post<{ Params: { id: string } }>('/dispatch/:id/approve-target', async (request, reply) => {
     const parsed = approveTargetSchema.safeParse(request.body);
