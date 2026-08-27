@@ -28,11 +28,14 @@ import {
   serializeDispatch,
   listThreadDispatches,
   listThreadDispatchesHttpStatus,
+  fetchDispatchPlan,
+  fetchDispatchPlanHttpStatus,
 } from '../orchestrator/dispatch-view.js';
 import type {
   DispatchDetail,
   ThreadReadClient,
   ThreadDispatchListClient,
+  DispatchPlanReadClient,
 } from '../orchestrator/dispatch-view.js';
 
 /** prisma.dispatch を dispatch-store / dispatch-gates / dispatch-worker が要求する構造的インターフェースへ橋渡しする。 */
@@ -46,6 +49,7 @@ const dispatchClient = prisma.dispatch as unknown as DispatchClient & DispatchQu
  */
 const threadReadClient = prisma.thread as unknown as ThreadReadClient;
 const dispatchListClient = prisma.dispatch as unknown as ThreadDispatchListClient;
+const dispatchPlanReadClient = prisma.dispatch as unknown as DispatchPlanReadClient;
 
 const gateCore = {
   listProjects: coreClient.listProjects,
@@ -85,6 +89,23 @@ export async function dispatchRoutes(app: FastifyInstance) {
       return reply.status(200).send({ dispatches: result.dispatches });
     }
   );
+
+  // サイクル1.17 ④-1b: プラン本文は manager DB に持たない（権威は core）。
+  // ゲート②承認カード用に都度取り寄せる（読み取り専用・副作用ゼロ）。
+  app.get<{ Params: { id: string } }>('/dispatch/:id/plan', async (request, reply) => {
+    const result = await fetchDispatchPlan(
+      { dispatches: dispatchPlanReadClient, threads: threadReadClient, core: gateCore },
+      request.params.id
+    );
+    if (!result.ok) {
+      const body =
+        result.code === 'plan_not_ready'
+          ? { error: result.reason, status: result.status }
+          : { error: result.reason };
+      return reply.status(fetchDispatchPlanHttpStatus(result)).send(body);
+    }
+    return reply.status(200).send(result.plan);
+  });
 
   app.post<{ Params: { id: string } }>('/dispatch/:id/approve-target', async (request, reply) => {
     const parsed = approveTargetSchema.safeParse(request.body);

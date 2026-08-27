@@ -7,12 +7,17 @@ import {
   serializeDispatch,
   listThreadDispatches,
   listThreadDispatchesHttpStatus,
+  fetchDispatchPlan,
+  fetchDispatchPlanHttpStatus,
 } from './dispatch-view.js';
 import type {
   DispatchDetail,
   ThreadReadClient,
   ThreadDispatchListClient,
   ListThreadDispatchesResult,
+  DispatchPlanReadClient,
+  PlanCoreClient,
+  DispatchPlanResult,
 } from './dispatch-view.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -187,4 +192,251 @@ test('136. listThreadDispatchesHttpStatus: ok は 200、thread_not_found は 404
   const notFound: ListThreadDispatchesResult = { ok: false, code: 'thread_not_found', reason: 'thread not found' };
   assert.equal(listThreadDispatchesHttpStatus(ok), 200);
   assert.equal(listThreadDispatchesHttpStatus(notFound), 404);
+});
+
+// ── サイクル1.17 ④-1b: GET /dispatch/:id/plan（fetchDispatchPlan） ──────────
+
+/** テスト用の Dispatch 行（fetchDispatchPlan が読む4列のみ）。 */
+function dummyPlanDispatchRow(
+  overrides: Partial<{ id: string; threadId: string; submissionId: string | null; status: string }> = {}
+): { id: string; threadId: string; submissionId: string | null; status: string } {
+  return {
+    id: 'dispatch-1',
+    threadId: 'thread-1',
+    submissionId: 'submission-1',
+    status: 'awaiting_approval',
+    ...overrides,
+  };
+}
+
+/**
+ * DispatchPlanReadClient のスタブ。findUnique の呼び出しを記録する。
+ * update/updateMany/create は「呼ばれたら throw」で持たせ、副作用ゼロを実行でも固定する
+ * （DispatchPlanReadClient 型は findUnique しか宣言しないため型としては構造的に不可能だが、
+ * ここでは念のため実行時にも固定する）。
+ */
+function stubPlanDispatch(
+  row: { id: string; threadId: string; submissionId: string | null; status: string } | null
+): { client: DispatchPlanReadClient; calls: Array<{ where: { id: string } }> } {
+  const calls: Array<{ where: { id: string } }> = [];
+  const client = {
+    async findUnique(args: { where: { id: string } }) {
+      calls.push(args);
+      return row;
+    },
+    async update() {
+      throw new Error('update は呼ばれてはならない');
+    },
+    async updateMany() {
+      throw new Error('updateMany は呼ばれてはならない');
+    },
+    async create() {
+      throw new Error('create は呼ばれてはならない');
+    },
+  } as unknown as DispatchPlanReadClient;
+  return { client, calls };
+}
+
+/** PlanCoreClient のスタブ。getPlan の引数（submissionId）を記録する。 */
+function stubPlanCore(impl: (submissionId: string) => Promise<unknown>): {
+  core: PlanCoreClient;
+  calls: string[];
+} {
+  const calls: string[] = [];
+  return {
+    calls,
+    core: {
+      async getPlan(submissionId: string) {
+        calls.push(submissionId);
+        return impl(submissionId);
+      },
+    },
+  };
+}
+
+/** #140/#141/#142 用: getPlan が呼ばれたら即 throw する（呼び出し 0 回を強制検証する）。 */
+function forbiddenPlanCore(): PlanCoreClient {
+  return {
+    async getPlan() {
+      throw new Error('getPlan は呼ばれてはならない');
+    },
+  };
+}
+
+test('137. fetchDispatchPlan: 正常系（ready）は core の応答をそのまま整形して返す', async () => {
+  const dispatches = stubPlanDispatch(dummyPlanDispatchRow());
+  const threads = stubThreads({ id: 'thread-1', deletedAt: null });
+  const core = stubPlanCore(async () => ({
+    status: 'ready',
+    planMarkdown: '# plan',
+    summary: 'ok',
+    executable: true,
+  }));
+  const result = await fetchDispatchPlan(
+    { dispatches: dispatches.client, threads: threads.client, core: core.core },
+    'dispatch-1'
+  );
+  assert.deepEqual(result, {
+    ok: true,
+    plan: { status: 'ready', planMarkdown: '# plan', summary: 'ok', executable: true },
+  });
+  assert.deepEqual(core.calls, ['submission-1']);
+});
+
+test('138. fetchDispatchPlan: core が planning 中を返せば status: "planning" のまま素通しする', async () => {
+  const dispatches = stubPlanDispatch(dummyPlanDispatchRow());
+  const threads = stubThreads({ id: 'thread-1', deletedAt: null });
+  const core = stubPlanCore(async () => ({ status: 'planning' }));
+  const result = await fetchDispatchPlan(
+    { dispatches: dispatches.client, threads: threads.client, core: core.core },
+    'dispatch-1'
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.deepEqual(result.plan, { status: 'planning' });
+    assert.equal('planMarkdown' in result.plan, false);
+  }
+});
+
+test('139. fetchDispatchPlan: core の余計なキー・型不正な値は出力に漏れない（ホワイトリスト）', async () => {
+  const dispatches = stubPlanDispatch(dummyPlanDispatchRow());
+  const threads = stubThreads({ id: 'thread-1', deletedAt: null });
+  const core = stubPlanCore(async () => ({
+    status: 'ready',
+    planMarkdown: 123, // 型不正: string でない
+    secretToken: 'do-not-leak',
+    executable: 'yes', // 型不正: boolean でない
+  }));
+  const result = await fetchDispatchPlan(
+    { dispatches: dispatches.client, threads: threads.client, core: core.core },
+    'dispatch-1'
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.deepEqual(result.plan, { status: 'ready' });
+    assert.equal((result.plan as unknown as { secretToken?: string }).secretToken, undefined);
+  }
+});
+
+test('140. fetchDispatchPlan: submissionId が null なら plan_not_ready、core は呼ばれない', async () => {
+  const dispatches = stubPlanDispatch(dummyPlanDispatchRow({ submissionId: null, status: 'draft' }));
+  const threads = stubThreads({ id: 'thread-1', deletedAt: null });
+  const result = await fetchDispatchPlan(
+    { dispatches: dispatches.client, threads: threads.client, core: forbiddenPlanCore() },
+    'dispatch-1'
+  );
+  assert.deepEqual(result, {
+    ok: false,
+    code: 'plan_not_ready',
+    reason: 'この Dispatch には submissionId がありません。',
+    status: 'draft',
+  });
+});
+
+test('141. fetchDispatchPlan: Dispatch が存在しなければ dispatch_not_found、threads/core は呼ばれない', async () => {
+  const dispatches = stubPlanDispatch(null);
+  const threads = stubThreads(null);
+  const result = await fetchDispatchPlan(
+    { dispatches: dispatches.client, threads: threads.client, core: forbiddenPlanCore() },
+    'dispatch-missing'
+  );
+  assert.deepEqual(result, { ok: false, code: 'dispatch_not_found', reason: 'dispatch not found' });
+  assert.equal(threads.calls.length, 0);
+});
+
+test('142. fetchDispatchPlan: 所属 Thread が soft-delete 済みなら dispatch_not_found、core は呼ばれない', async () => {
+  const dispatches = stubPlanDispatch(dummyPlanDispatchRow());
+  const threads = stubThreads({ id: 'thread-1', deletedAt: new Date('2026-08-01T00:00:00.000Z') });
+  const result = await fetchDispatchPlan(
+    { dispatches: dispatches.client, threads: threads.client, core: forbiddenPlanCore() },
+    'dispatch-1'
+  );
+  assert.deepEqual(result, { ok: false, code: 'dispatch_not_found', reason: 'dispatch not found' });
+});
+
+test('143. fetchDispatchPlan: core 呼び出しが失敗すれば core_unavailable、Dispatch 状態は変更しない', async () => {
+  const dispatches = stubPlanDispatch(dummyPlanDispatchRow());
+  const threads = stubThreads({ id: 'thread-1', deletedAt: null });
+  const core = stubPlanCore(async () => {
+    throw new Error('core MCP へ到達できませんでした。');
+  });
+  const result = await fetchDispatchPlan(
+    { dispatches: dispatches.client, threads: threads.client, core: core.core },
+    'dispatch-1'
+  );
+  assert.deepEqual(result, {
+    ok: false,
+    code: 'core_unavailable',
+    reason: 'core MCP へ到達できませんでした。',
+  });
+});
+
+test('144. fetchDispatchPlan: core 応答に status が無ければ core_unavailable（成功に倒さない）', async () => {
+  const dispatches = stubPlanDispatch(dummyPlanDispatchRow());
+  const threads = stubThreads({ id: 'thread-1', deletedAt: null });
+  const core = stubPlanCore(async () => ({ foo: 'bar' }));
+  const result = await fetchDispatchPlan(
+    { dispatches: dispatches.client, threads: threads.client, core: core.core },
+    'dispatch-1'
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, 'core_unavailable');
+  }
+});
+
+test('145. fetchDispatchPlan: 全経路で Dispatch の更新系は一切呼ばれない（副作用ゼロ）', async () => {
+  // 正常系・404・409・502 いずれの経路でも update/updateMany/create を呼べば
+  // スタブが throw するため、例外なく完走すること自体が副作用ゼロの証拠になる。
+  const scenarios: Array<() => Promise<DispatchPlanResult>> = [
+    async () => {
+      const dispatches = stubPlanDispatch(dummyPlanDispatchRow());
+      const threads = stubThreads({ id: 'thread-1', deletedAt: null });
+      const core = stubPlanCore(async () => ({ status: 'ready', planMarkdown: '# x' }));
+      return fetchDispatchPlan({ dispatches: dispatches.client, threads: threads.client, core: core.core }, 'dispatch-1');
+    },
+    async () => {
+      const dispatches = stubPlanDispatch(null);
+      const threads = stubThreads(null);
+      return fetchDispatchPlan(
+        { dispatches: dispatches.client, threads: threads.client, core: forbiddenPlanCore() },
+        'dispatch-missing'
+      );
+    },
+    async () => {
+      const dispatches = stubPlanDispatch(dummyPlanDispatchRow({ submissionId: null }));
+      const threads = stubThreads({ id: 'thread-1', deletedAt: null });
+      return fetchDispatchPlan(
+        { dispatches: dispatches.client, threads: threads.client, core: forbiddenPlanCore() },
+        'dispatch-1'
+      );
+    },
+    async () => {
+      const dispatches = stubPlanDispatch(dummyPlanDispatchRow());
+      const threads = stubThreads({ id: 'thread-1', deletedAt: null });
+      const core = stubPlanCore(async () => {
+        throw new Error('接続不可');
+      });
+      return fetchDispatchPlan({ dispatches: dispatches.client, threads: threads.client, core: core.core }, 'dispatch-1');
+    },
+  ];
+  for (const run of scenarios) {
+    await run();
+  }
+});
+
+test('146. fetchDispatchPlanHttpStatus: ok=200、dispatch_not_found=404、plan_not_ready=409、core_unavailable=502', () => {
+  const ok: DispatchPlanResult = { ok: true, plan: { status: 'ready' } };
+  const notFound: DispatchPlanResult = { ok: false, code: 'dispatch_not_found', reason: 'dispatch not found' };
+  const notReady: DispatchPlanResult = {
+    ok: false,
+    code: 'plan_not_ready',
+    reason: 'この Dispatch には submissionId がありません。',
+    status: 'draft',
+  };
+  const unavailable: DispatchPlanResult = { ok: false, code: 'core_unavailable', reason: 'core error' };
+  assert.equal(fetchDispatchPlanHttpStatus(ok), 200);
+  assert.equal(fetchDispatchPlanHttpStatus(notFound), 404);
+  assert.equal(fetchDispatchPlanHttpStatus(notReady), 409);
+  assert.equal(fetchDispatchPlanHttpStatus(unavailable), 502);
 });
