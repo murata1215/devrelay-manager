@@ -2,3 +2,9 @@ node_modules
 dist
 .env
 *.log
+
+# DevRelay ランタイム生成物（会話ログ・セッションID・添付・出力先）。
+# 会話ログには機微情報が入りうるため、絶対に追跡しない。
+.devrelay/
+.devrelay-files/
+.devrelay-output/
