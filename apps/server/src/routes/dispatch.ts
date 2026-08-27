@@ -14,9 +14,16 @@ import { z } from 'zod';
 import { prisma } from '../db/client.js';
 import { parseDispatchStatus, isTerminal } from '../orchestrator/dispatch-state.js';
 import type { DispatchClient, DispatchQueryClient } from '../orchestrator/dispatch-store.js';
-import { approveTarget, approvePlan, retryStale, cancelDispatch } from '../orchestrator/dispatch-gates.js';
+import {
+  approveTarget,
+  approvePlan,
+  retryStale,
+  cancelDispatch,
+  approveTargetHttpStatus,
+} from '../orchestrator/dispatch-gates.js';
 import { tick, reconcileOrphans } from '../orchestrator/dispatch-worker.js';
 import * as coreClient from '../core/coreClient.js';
+import { readManagerSettingsFile } from '../orchestrator/manager-settings.js';
 
 /** prisma.dispatch を dispatch-store / dispatch-gates / dispatch-worker が要求する構造的インターフェースへ橋渡しする。 */
 const dispatchClient = prisma.dispatch as unknown as DispatchClient & DispatchQueryClient;
@@ -55,14 +62,15 @@ export async function dispatchRoutes(app: FastifyInstance) {
       return reply.status(404).send({ error: 'dispatch not found' });
     }
     try {
+      const settings = readManagerSettingsFile();
       const result = await approveTarget(
-        { client: dispatchClient, core: gateCore },
+        { client: dispatchClient, core: gateCore, settings },
         { id: row.id, projectId: row.projectId, instruction: parsed.data.instruction }
       );
       if (!result.ok) {
-        return reply.status(409).send({ error: result.reason });
+        return reply.status(approveTargetHttpStatus(result)).send({ error: result.reason });
       }
-      return reply.status(200).send({ ok: true });
+      return reply.status(approveTargetHttpStatus(result)).send({ ok: true, instruction: result.instruction });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.status(409).send({ error: message });

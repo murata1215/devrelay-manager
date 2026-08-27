@@ -8,22 +8,59 @@
  * `header + body + footer` を文字列連結するだけであり、body（LLM 出力）が
  * header/footer を書き換える手段は無い（テンプレ文字列は Settings からしか来ない）。
  *
+ * サイクル1.15: composeInstruction は冪等である（同じ settings に対して2回適用しても
+ * 結果が変わらない）。これは stripGovernanceTemplate による正規化（既に付いている
+ * header 接頭辞 / footer 接尾辞を剥がしてから連結し直す）で担保している。冪等性が
+ * あるため、ゲート①（dispatch-gates.ts の approveTarget）は「人間が書き換えた
+ * 可能性のある instruction」に対して draft 生成時と同じ composeInstruction を
+ * 無条件に再適用でき、それが正常経路（draft の全文をそのまま渡す）を壊さない。
+ *
  * 純粋モジュール：import は manager-settings.ts の型のみ（fs・DB・core に触れない）。
  */
 import type { ManagerSettings } from './manager-settings.js';
 import { assertRequiredClausesPresent } from './manager-settings.js';
 
 /**
+ * 既に付いている header 接頭辞 / footer 接尾辞を取り除く（冪等化の中核）。
+ *
+ * header/footer が空文字（managerSettingsSchema の z.string() は空文字を許すため
+ * 起こりうる）のときは剥がす対象が無いのでループに入らない（無限ループガード）。
+ * 二重・三重に付いていた場合（過去のバグや手動編集の結果）もすべて剥がしてから
+ * composeInstruction で1回だけ付け直すことで、結果として冪等になる。
+ */
+export function stripGovernanceTemplate(text: string, settings: ManagerSettings): string {
+  const { header, footer } = settings.governance;
+  let out = text;
+  if (header.length > 0) {
+    while (out.startsWith(header)) {
+      out = out.slice(header.length);
+    }
+  }
+  if (footer.length > 0) {
+    while (out.endsWith(footer)) {
+      out = out.slice(0, out.length - footer.length);
+    }
+  }
+  return out;
+}
+
+/**
  * LLM が作文した本文（body）を governance テンプレで機械的に包む。
  *
- * body が空・空白のみなら throw する（no-silent-failure: 空の instruction を
- * テンプレだけで水増しして submit しない）。
+ * サイクル1.15: 冪等にするため、まず stripGovernanceTemplate で既存の
+ * header/footer を剥がしてから連結し直す。これにより body に既に合成済みの
+ * 全文（header+本文+footer）を渡しても二重に付かない
+ * （composeInstruction(composeInstruction(x, s), s) === composeInstruction(x, s)）。
+ *
+ * 空チェックは strip 後の本文に対して行う（no-silent-failure: header/footer だけの
+ * 文字列を渡された場合も本文空として throw する。テンプレのみでの submit はできない）。
  */
 export function composeInstruction(body: string, settings: ManagerSettings): string {
-  if (body.trim() === '') {
+  const stripped = stripGovernanceTemplate(body, settings);
+  if (stripped.trim() === '') {
     throw new Error('instruction 本文が空です。governance テンプレのみでの submit はできません。');
   }
-  return settings.governance.header + body + settings.governance.footer;
+  return settings.governance.header + stripped + settings.governance.footer;
 }
 
 /**

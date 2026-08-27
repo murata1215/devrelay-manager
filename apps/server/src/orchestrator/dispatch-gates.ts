@@ -12,6 +12,8 @@ import { transitionDispatch } from './dispatch-store.js';
 import type { DispatchClient } from './dispatch-store.js';
 import type { DispatchStatus } from './dispatch-state.js';
 import { classifyPlanResult } from './core-result.js';
+import { composeInstruction, assertGovernanceApplied } from './governance.js';
+import type { ManagerSettings } from './manager-settings.js';
 
 export interface GateCoreClient {
   listProjects(): Promise<Array<{ id: string }>>;
@@ -31,32 +33,71 @@ export interface ApproveTargetInput {
   instruction: string;
 }
 
-export type ApproveTargetResult = { ok: true } | { ok: false; reason: string };
+/**
+ * サイクル1.15: ゲート①専用の deps。governance 再注入に draft 生成時と同じ
+ * composeInstruction を使うため、Settings を注入する（GateDeps 自体は変えない。
+ * approvePlan/retryStale/cancelDispatch は GateDeps のままで型不変を保つ）。
+ */
+export interface ApproveTargetDeps extends GateDeps {
+  /** governance 再注入に使う Settings（draft 生成時と同じ composeInstruction に渡す）。 */
+  settings: ManagerSettings;
+}
+
+export type ApproveTargetResult =
+  | { ok: true; instruction: string }
+  | { ok: false; code: 'empty_instruction' | 'fresh_check'; reason: string };
 
 /**
- * ゲート①: 宛先・内容の事前承認。freshCheck = core の list_projects に projectId が
- * 存在するか。存在しなければ遷移せず理由を返す（spec §8「勝手に諦めない」＝draft に留まる）。
+ * ゲート①: 宛先・内容の事前承認。
+ *
+ * サイクル1.15: 人間操作画面から任意文字列を送れるため、書き戻す前に必ず
+ * draft 生成時と同じ composeInstruction / assertGovernanceApplied を再適用する
+ * （governance.ts の冪等性により、draft の全文をそのまま渡す正常経路は壊れない）。
+ *
+ * 手順: ①空チェック（core RPC も遷移も呼ばない・draft のまま） → ②freshCheck（core の
+ * list_projects に projectId が存在するか） → ③governance 再注入 → ④transitionDispatch。
  */
 export async function approveTarget(
-  deps: GateDeps,
+  deps: ApproveTargetDeps,
   input: ApproveTargetInput
 ): Promise<ApproveTargetResult> {
+  if (input.instruction.trim() === '') {
+    return {
+      ok: false,
+      code: 'empty_instruction',
+      reason: 'instruction が空・空白のみです。governance テンプレのみでの submit はできません。',
+    };
+  }
+
   const projects = await deps.core.listProjects();
   const exists = projects.some((p) => p.id === input.projectId);
   if (!exists) {
     return {
       ok: false,
+      code: 'fresh_check',
       reason: `projectId="${input.projectId}" は core の list_projects に見つかりません（freshCheck 失敗）。`,
     };
   }
+
+  const instruction = composeInstruction(input.instruction, deps.settings);
+  assertGovernanceApplied(instruction, deps.settings);
+
   await transitionDispatch(deps.client, {
     id: input.id,
     from: 'draft',
     to: 'submitting',
-    patch: { instruction: input.instruction },
+    patch: { instruction },
     at: deps.now?.(),
   });
-  return { ok: true };
+  return { ok: true, instruction };
+}
+
+/** ゲート①の結果 → HTTP ステータス（routes/dispatch.ts が使う）。 */
+export function approveTargetHttpStatus(result: ApproveTargetResult): 200 | 400 | 409 {
+  if (result.ok) {
+    return 200;
+  }
+  return result.code === 'empty_instruction' ? 400 : 409;
 }
 
 export interface ApprovePlanInput {

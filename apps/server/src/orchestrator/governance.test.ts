@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { composeInstruction, assertGovernanceApplied } from './governance.js';
+import { composeInstruction, assertGovernanceApplied, stripGovernanceTemplate } from './governance.js';
 import { loadManagerSettings } from './manager-settings.js';
 
 function settings() {
@@ -53,4 +53,40 @@ test('87. composeInstruction: body にテンプレ無効化の指示があって
   assert.doesNotThrow(() => assertGovernanceApplied(instruction, s));
   assert.ok(instruction.startsWith('===HEADER==='));
   assert.ok(instruction.endsWith('===FOOTER=== devlog STOP'));
+});
+
+test('122. composeInstruction: 合成済み全文へ再適用しても結果が変わらない（冪等）', () => {
+  const s = settings();
+  const once = composeInstruction('本文です', s);
+  const twice = composeInstruction(once, s);
+  assert.equal(twice, once);
+  // header/footer が二重化していないことも直接確認する。
+  assert.equal(twice.indexOf('===HEADER==='), twice.lastIndexOf('===HEADER==='));
+  assert.equal(twice.indexOf('===FOOTER==='), twice.lastIndexOf('===FOOTER==='));
+});
+
+test('123. composeInstruction: header が空文字の設定でも無限ループせず冪等（ガードの回帰）', () => {
+  const s = loadManagerSettings({
+    version: 1,
+    defaultTier: 'standard',
+    tierModels: {
+      heavy: { model: 'claude-opus-5', label: 'Heavy', idForm: 'pinned-dateless', note: 'test note heavy' },
+      standard: { model: 'claude-sonnet-5', label: 'Standard', idForm: 'pinned-dateless', note: 'test note standard' },
+      light: { model: 'claude-haiku-4-5-20251001', label: 'Light', idForm: 'pinned-dated', note: 'test note light' },
+    },
+    modelIdSource: {
+      url: 'https://platform.claude.com/docs/en/about-claude/models/overview',
+      checkedAt: '2026-08-26',
+    },
+    llm: { timeoutMs: 60000, maxTokens: 8192 },
+    governance: {
+      requiredClauses: ['STOP'],
+      header: '', // header 空文字 -> stripGovernanceTemplate のガードが効く必要がある
+      footer: '\n===FOOTER=== STOP',
+    },
+  });
+  const once = composeInstruction('本文です', s);
+  const twice = composeInstruction(once, s);
+  assert.equal(twice, once);
+  assert.equal(stripGovernanceTemplate(once, s), '本文です');
 });
