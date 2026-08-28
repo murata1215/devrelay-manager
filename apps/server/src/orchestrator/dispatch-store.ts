@@ -19,6 +19,10 @@ export interface DispatchPatch {
   buildId?: string | null;
   instruction?: string | null;
   devlogPath?: string | null;
+  /** サイクル1.19 S2: approve-target で投げ先を差し替える場合のみ含める。 */
+  projectId?: string;
+  /** サイクル1.19 S3: ゲート②承認時の自由記述。core への approve_implementation note に伝播する。 */
+  approveNote?: string | null;
 }
 
 interface DispatchUpdateManyArgs {
@@ -177,6 +181,8 @@ export interface DispatchListRow {
   buildId: string | null;
   projectId: string;
   instruction: string | null;
+  /** サイクル1.19 S3: worker が approveImplementation の第3引数へ渡す。 */
+  approveNote: string | null;
 }
 
 interface DispatchFindManyArgs {

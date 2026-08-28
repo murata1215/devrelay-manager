@@ -163,6 +163,8 @@ export interface GetBuildStatusResult {
   buildId?: string;
   summary?: string;
   done: boolean;
+  // サイクル1.19 S4/S5: devlog パスを core が実際に返すかは未確認（型の実態合わせのみ）。
+  devlogPath?: string;
 }
 
 /** core が把握している全プロジェクトを取得する（online フラグ含む）。 */
@@ -184,15 +186,23 @@ export async function getPlan(submissionId: string): Promise<GetPlanResult> {
   return callTool<GetPlanResult>('get_plan', { submissionId });
 }
 
-/** プランを承認し実装フェーズへ進める。 */
+/**
+ * プランを承認し実装フェーズへ進める。
+ *
+ * サイクル1.19 S3: note は「案B/案C」等の人間からの自由記述を core へ伝えるチャネル。
+ * core が未知引数 note を拒否する可能性を排除できないため、note が明示された時だけ
+ * args に note キー自体を含める（未指定時は現行と完全同形の呼び出しを保つ）。
+ */
 export async function approveImplementation(
   projectId: string,
-  submissionId: string
+  submissionId: string,
+  note?: string
 ): Promise<ApproveImplementationResult> {
-  return callTool<ApproveImplementationResult>('approve_implementation', {
-    projectId,
-    submissionId,
-  });
+  const args: Record<string, unknown> = { projectId, submissionId };
+  if (note !== undefined) {
+    args.note = note;
+  }
+  return callTool<ApproveImplementationResult>('approve_implementation', args);
 }
 
 /** ビルド状況を取得する。 */

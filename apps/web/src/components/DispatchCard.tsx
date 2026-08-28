@@ -5,14 +5,16 @@
  * 承認・中止系のボタンはすべて window.confirm を1枚挟み、busy 中は disabled にして
  * 二重送信を防ぐ（呼び出し元 App.tsx が busy 管理する）。
  */
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import type { CoreProjectDto, DispatchDto, DispatchPlanDto } from '../types.js';
 import {
   DISPATCH_STATUS_LABELS,
   statusToneOf,
   cardKindFor,
   canCancel,
+  doneRowsOf,
 } from '../lib/dispatch-status.js';
+import { splitPlanNoise } from '../lib/plan-text.js';
 import * as api from '../api.js';
 
 interface DispatchCardProps {
@@ -37,14 +39,21 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
   const projectName = resolveProjectName(dispatch.projectId, projects);
 
   const [instruction, setInstruction] = useState(dispatch.instruction ?? '');
+  const [targetProjectId, setTargetProjectId] = useState(dispatch.projectId);
   const [plan, setPlan] = useState<DispatchPlanDto | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [showNoise, setShowNoise] = useState(false);
 
   // draft カードは instruction が外から更新されたら編集欄も追随させる。
   useEffect(() => {
     setInstruction(dispatch.instruction ?? '');
   }, [dispatch.instruction]);
+
+  // draft カードは projectId が外から更新されたら選択欄も追随させる。
+  useEffect(() => {
+    setTargetProjectId(dispatch.projectId);
+  }, [dispatch.projectId]);
 
   // awaiting_approval カードを展開したときに1回だけプランを取得する。
   useEffect(() => {
@@ -104,19 +113,29 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
           />
           <div className="dispatch-card__target">
             投げ先:
-            <select disabled value={dispatch.projectId}>
-              <option value={dispatch.projectId}>{projectName}</option>
+            <select
+              value={targetProjectId}
+              disabled={busy}
+              onChange={(e) => setTargetProjectId(e.target.value)}
+            >
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                  {!project.online ? '（オフライン）' : ''}
+                </option>
+              ))}
+              {!projects.some((p) => p.id === dispatch.projectId) && (
+                <option value={dispatch.projectId}>{projectName}</option>
+              )}
             </select>
-            <span className="dispatch-card__note">
-              ※ approve-target は instruction のみ受理するため、投げ先の変更はここではできません。
-            </span>
           </div>
           <button
             type="button"
             disabled={busy || instruction.trim().length === 0}
             onClick={() =>
               void runGate('投げ先を承認します（ゲート①）。よろしいですか？', async () => {
-                await api.approveTarget(dispatch.id, instruction.trim());
+                const nextProjectId = targetProjectId !== dispatch.projectId ? targetProjectId : undefined;
+                await api.approveTarget(dispatch.id, instruction.trim(), nextProjectId);
               })
             }
           >
@@ -134,7 +153,23 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
           {expanded && plan && (
             <div className="dispatch-card__plan">
               {plan.summary && <p className="dispatch-card__summary">{plan.summary}</p>}
-              {plan.planMarkdown && <pre>{plan.planMarkdown}</pre>}
+              {plan.planMarkdown &&
+                (() => {
+                  const { body, noise } = splitPlanNoise(plan.planMarkdown);
+                  return (
+                    <>
+                      <pre>{body}</pre>
+                      {noise.length > 0 && (
+                        <>
+                          <button type="button" onClick={() => setShowNoise((v) => !v)}>
+                            {showNoise ? 'ログ行を隠す' : `ログ行を表示 (${noise.length}件)`}
+                          </button>
+                          {showNoise && <pre className="dispatch-card__plan-noise">{noise.join('\n')}</pre>}
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
               {!plan.planMarkdown && <p>プラン本文はまだありません（status: {plan.status}）。</p>}
             </div>
           )}
@@ -172,18 +207,12 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
 
       {kind === 'done' && (
         <dl className="dispatch-card__done">
-          <dt>submissionId</dt>
-          <dd>{dispatch.submissionId ?? '-'}</dd>
-          <dt>buildId</dt>
-          <dd>{dispatch.buildId ?? '-'}</dd>
-          <dt>devlogPath</dt>
-          <dd>{dispatch.devlogPath ?? '-'}</dd>
-          <dt>inputTokens</dt>
-          <dd>{dispatch.inputTokens ?? '-'}</dd>
-          <dt>outputTokens</dt>
-          <dd>{dispatch.outputTokens ?? '-'}</dd>
-          <dt>responseModel</dt>
-          <dd>{dispatch.responseModel ?? '-'}</dd>
+          {doneRowsOf(dispatch).map((row) => (
+            <Fragment key={row.label}>
+              <dt>{row.label}</dt>
+              <dd>{row.value}</dd>
+            </Fragment>
+          ))}
         </dl>
       )}
 

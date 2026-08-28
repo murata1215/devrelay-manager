@@ -23,6 +23,7 @@ function dispatch(id: string, createdAt: string, status = 'draft'): DispatchDto 
     statusReason: null,
     lastPolledAt: null,
     devlogPath: null,
+    approveNote: null,
     cost: null,
     tier: null,
     model: null,

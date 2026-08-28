@@ -40,6 +40,9 @@ const orchestrateSchema = z.object({
   content: z.string().min(1),
   tier: z.string().optional(),
   intent: z.string().optional(),
+  // サイクル1.19 S1: web の project 選択をヒントとして渡す任意フィールド。
+  // 候補外の id は無視する（orchestrator-llm.ts 側で処理）。未指定時は挙動不変。
+  projectIds: z.array(z.string()).optional(),
 });
 
 /**
@@ -135,6 +138,7 @@ export async function orchestratorRoutes(app: FastifyInstance) {
           managerRepoPath: managerRepoPath(),
           intent,
           tierOverride,
+          preferredProjectIds: parsed.data.projectIds,
         });
         return reply.status(200).send({ messageId: message.id, result });
       } catch (err) {

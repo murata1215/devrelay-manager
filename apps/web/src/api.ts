@@ -118,11 +118,21 @@ export function listProjects(): Promise<CoreProjectDto[]> {
  * POST /threads/:id/orchestrate — orchestrator LLM を1回呼ぶ。
  * このエンドポイントが user Message 行の作成まで面倒を見るため、
  * 呼び出し側で事前に POST /messages を叩いてはいけない（二重投稿になる）。
+ * projectIds はサイクル1.19 S1 で追加された選択ヒント。未指定/空なら送らない
+ * （サーバー側の後方互換な扱いに合わせる）。
  */
-export function orchestrate(threadId: string, content: string): Promise<OrchestrateResultDto> {
+export function orchestrate(
+  threadId: string,
+  content: string,
+  projectIds?: string[]
+): Promise<OrchestrateResultDto> {
+  const body: { content: string; projectIds?: string[] } = { content };
+  if (projectIds && projectIds.length > 0) {
+    body.projectIds = projectIds;
+  }
   return request<OrchestrateResultDto>(`/threads/${threadId}/orchestrate`, {
     method: 'POST',
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -131,11 +141,23 @@ export function getPlan(dispatchId: string): Promise<DispatchPlanDto> {
   return request<DispatchPlanDto>(`/dispatch/${dispatchId}/plan`);
 }
 
-/** POST /dispatch/:id/approve-target — ゲート①（投げ先の承認）。 */
-export function approveTarget(dispatchId: string, instruction: string): Promise<{ ok: true; instruction: string }> {
+/**
+ * POST /dispatch/:id/approve-target — ゲート①（投げ先の承認）。
+ * projectId はサイクル1.19 S2 で追加された投げ先差し替え。元と同じ選択のときは
+ * 送らない（サーバー側 patch を現行と同形に保つ設計に合わせる）。
+ */
+export function approveTarget(
+  dispatchId: string,
+  instruction: string,
+  projectId?: string
+): Promise<{ ok: true; instruction: string }> {
+  const body: { instruction: string; projectId?: string } = { instruction };
+  if (projectId !== undefined) {
+    body.projectId = projectId;
+  }
   return request(`/dispatch/${dispatchId}/approve-target`, {
     method: 'POST',
-    body: JSON.stringify({ instruction }),
+    body: JSON.stringify(body),
   });
 }
 

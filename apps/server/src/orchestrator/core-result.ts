@@ -30,6 +30,7 @@ export interface ClassifiedBuildResult {
   kind: BuildResultKind;
   buildId?: string;
   summary?: string;
+  devlogPath?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -60,6 +61,17 @@ export function classifyPlanResult(raw: unknown): ClassifiedPlanResult {
   return { kind: 'unknown' };
 }
 
+/**
+ * サイクル1.19 S4/S5: devlog パスのフィールド名は未確認（実 build で確認できていない）。
+ * devlogPath -> devlog_path -> devlog の順で最初に見つかった string を寛容に採用する。
+ */
+function extractDevlogPath(raw: Record<string, unknown>): string | undefined {
+  if (typeof raw.devlogPath === 'string') return raw.devlogPath;
+  if (typeof raw.devlog_path === 'string') return raw.devlog_path;
+  if (typeof raw.devlog === 'string') return raw.devlog;
+  return undefined;
+}
+
 /** get_build_status の生応答を分類する。 */
 export function classifyBuildResult(raw: unknown): ClassifiedBuildResult {
   if (!isRecord(raw)) {
@@ -69,16 +81,17 @@ export function classifyBuildResult(raw: unknown): ClassifiedBuildResult {
   const done = raw.done;
   const buildId = typeof raw.buildId === 'string' ? raw.buildId : undefined;
   const summary = typeof raw.summary === 'string' ? raw.summary : undefined;
+  const devlogPath = extractDevlogPath(raw);
 
   if (typeof done !== 'boolean') {
     // done フィールド自体が欠落・型不正 = 応答が想定形をしていない。判定不能。
-    return { kind: 'unknown', buildId, summary };
+    return { kind: 'unknown', buildId, summary, devlogPath };
   }
 
   if (done === false) {
     // {"phase":"queued","done":false} のような実測応答を含む。done:false な限り
     // phase の語彙は問わず running 扱いにする（queued/building/... を列挙化しない）。
-    return { kind: 'running', buildId, summary };
+    return { kind: 'running', buildId, summary, devlogPath };
   }
 
   // done === true。成否を phase / success 系フィールドから判定する。
@@ -86,11 +99,11 @@ export function classifyBuildResult(raw: unknown): ClassifiedBuildResult {
   const success = typeof raw.success === 'boolean' ? raw.success : undefined;
 
   if (success === true || phase === 'succeeded' || phase === 'success' || phase === 'done') {
-    return { kind: 'succeeded', buildId, summary };
+    return { kind: 'succeeded', buildId, summary, devlogPath };
   }
   if (success === false || phase === 'failed' || phase === 'error') {
-    return { kind: 'failed', buildId, summary };
+    return { kind: 'failed', buildId, summary, devlogPath };
   }
   // done:true だが成否を示すフィールドが未知の語彙。判定不能。
-  return { kind: 'unknown', buildId, summary };
+  return { kind: 'unknown', buildId, summary, devlogPath };
 }

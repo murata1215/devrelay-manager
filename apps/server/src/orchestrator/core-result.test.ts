@@ -52,3 +52,35 @@ test('41. classifyBuildResult: done:true だが成否不明の語彙・done欠�
   assert.equal(classifyBuildResult({ done: 'nope' }).kind, 'unknown'); // done が真偽値でない
   assert.equal(classifyBuildResult(null).kind, 'unknown');
 });
+
+// ── サイクル1.19 S4/S5: devlogPath の取りこぼし修正 ─────────────────────────
+
+test('157. classifyBuildResult: devlogPath / devlog_path / devlog の順で最初に見つかった string を拾う', () => {
+  assert.equal(
+    classifyBuildResult({ done: true, phase: 'succeeded', devlogPath: 'doc/devlog/a.md' }).devlogPath,
+    'doc/devlog/a.md'
+  );
+  assert.equal(
+    classifyBuildResult({ done: true, phase: 'succeeded', devlog_path: 'doc/devlog/b.md' }).devlogPath,
+    'doc/devlog/b.md'
+  );
+  assert.equal(
+    classifyBuildResult({ done: true, phase: 'succeeded', devlog: 'doc/devlog/c.md' }).devlogPath,
+    'doc/devlog/c.md'
+  );
+  // 複数存在する場合は devlogPath が最優先
+  assert.equal(
+    classifyBuildResult({
+      done: true,
+      phase: 'succeeded',
+      devlogPath: 'doc/devlog/a.md',
+      devlog_path: 'doc/devlog/b.md',
+    }).devlogPath,
+    'doc/devlog/a.md'
+  );
+});
+
+test('158. classifyBuildResult: devlog 系フィールドが無ければ devlogPath は undefined', () => {
+  assert.equal(classifyBuildResult({ done: true, phase: 'succeeded' }).devlogPath, undefined);
+  assert.equal(classifyBuildResult({ done: false, phase: 'queued' }).devlogPath, undefined);
+});

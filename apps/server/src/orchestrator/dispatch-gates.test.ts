@@ -209,3 +209,71 @@ test('128. approveTargetHttpStatus: empty_instruction->400, fresh_check->409, ok
   assert.equal(approveTargetHttpStatus(emptyResult), 400);
   assert.equal(approveTargetHttpStatus(freshResult), 409);
 });
+
+// ── サイクル1.19 S2: approve-target の投げ先差し替え（newProjectId） ──────────
+
+test('150. approveTarget: newProjectId 未指定なら patch に projectId を含めない（現行維持）', async () => {
+  const { client, calls } = createStubClient();
+  const core = stubCore({ async listProjects() { return [{ id: 'proj_x' }]; } });
+  const result = await approveTarget(
+    { client, core, settings: settings() },
+    { id: 'd1', projectId: 'proj_x', instruction: 'x' }
+  );
+  assert.equal(result.ok, true);
+  assert.equal('projectId' in calls.updateMany[0].data, false);
+});
+
+test('151. approveTarget: newProjectId 指定で patch に差し替え後 projectId が入り、freshCheck は差し替え先で行われる', async () => {
+  const { client, calls } = createStubClient();
+  const listProjectsCalls: unknown[] = [];
+  const core = stubCore({
+    async listProjects() {
+      listProjectsCalls.push(true);
+      return [{ id: 'proj_new' }]; // 元の proj_x は存在しない一覧（差し替え先でのみ freshCheck が通る）
+    },
+  });
+  const result = await approveTarget(
+    { client, core, settings: settings() },
+    { id: 'd1', projectId: 'proj_x', instruction: 'x', newProjectId: 'proj_new' }
+  );
+  assert.equal(result.ok, true);
+  assert.equal(calls.updateMany[0].data.projectId, 'proj_new');
+  assert.equal(listProjectsCalls.length, 1);
+});
+
+test('152. approveTarget: 不正な newProjectId は fresh_check で無遷移（approveTargetHttpStatus は409）', async () => {
+  const { client, calls } = createStubClient();
+  const core = stubCore({ async listProjects() { return [{ id: 'proj_x' }]; } }); // proj_bogus は含まれない
+  const result = await approveTarget(
+    { client, core, settings: settings() },
+    { id: 'd1', projectId: 'proj_x', instruction: 'x', newProjectId: 'proj_bogus' }
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, 'fresh_check');
+    assert.match(result.reason, /proj_bogus/);
+  }
+  assert.equal(calls.updateMany.length, 0);
+  assert.equal(approveTargetHttpStatus(result), 409);
+});
+
+// ── サイクル1.19 S3: approve-plan の任意追記テキスト（note） ────────────────
+
+test('153. approvePlan: note 未指定なら patch に approveNote を含めない（現行維持）', async () => {
+  const { client, calls } = createStubClient();
+  const core = stubCore({ async getPlan() { return { status: 'ready', planMarkdown: '# plan' }; } });
+  const result = await approvePlan({ client, core }, { id: 'd1', submissionId: 's1' });
+  assert.equal(result.outcome, 'approved');
+  assert.equal('approveNote' in calls.updateMany[0].data, false);
+});
+
+test('154. approvePlan: note 指定で patch に approveNote が入る', async () => {
+  const { client, calls } = createStubClient();
+  const core = stubCore({ async getPlan() { return { status: 'ready', planMarkdown: '# plan' }; } });
+  const result = await approvePlan(
+    { client, core },
+    { id: 'd1', submissionId: 's1', note: '案Bで進めてください' }
+  );
+  assert.equal(result.outcome, 'approved');
+  assert.equal(calls.updateMany[0].data.approveNote, '案Bで進めてください');
+});

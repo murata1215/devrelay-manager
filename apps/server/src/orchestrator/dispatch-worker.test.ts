@@ -54,9 +54,9 @@ function createStubCore(overrides: Partial<WorkerCoreClient> = {}): {
       if (overrides.getPlan) return overrides.getPlan(submissionId);
       throw new Error('getPlan は呼ばれない想定のテストです');
     },
-    async approveImplementation(projectId, submissionId) {
-      calls.approveImplementation.push([projectId, submissionId]);
-      if (overrides.approveImplementation) return overrides.approveImplementation(projectId, submissionId);
+    async approveImplementation(projectId, submissionId, note) {
+      calls.approveImplementation.push([projectId, submissionId, note]);
+      if (overrides.approveImplementation) return overrides.approveImplementation(projectId, submissionId, note);
       throw new Error('approveImplementation は呼ばれない想定のテストです');
     },
     async getBuildStatus(submissionId) {
@@ -78,6 +78,7 @@ function row(overrides: Partial<DispatchListRow>): DispatchListRow {
     buildId: null,
     projectId: 'proj_1',
     instruction: null,
+    approveNote: null,
     ...overrides,
   };
 }
@@ -281,4 +282,47 @@ test('62. tick: findActionableDispatches の orderBy に lastPolledAt が含ま�
   const lastPolledAtIndex = orderBy.findIndex((entry) => 'lastPolledAt' in entry);
   const statusChangedAtIndex = orderBy.findIndex((entry) => 'statusChangedAt' in entry);
   assert.ok(lastPolledAtIndex < statusChangedAtIndex);
+});
+
+// ── サイクル1.19 S3: approveImplementation への note 伝播 ────────────────────
+
+test('155. tick: row.approveNote があれば approveImplementation の第3引数に渡る', async () => {
+  const r = row({ status: 'approving', submissionId: 's1', approveNote: '案Bで進めてください' });
+  const { client } = createStubQueryClient({ rows: [r] });
+  const { core, calls: coreCalls } = createStubCore({
+    async approveImplementation() {
+      return { phase: 'building' };
+    },
+  });
+  await tick({ client, core, now: () => new Date('2026-08-25T00:01:00Z') });
+  assert.deepEqual(coreCalls.approveImplementation[0], ['proj_1', 's1', '案Bで進めてください']);
+});
+
+test('156. tick: row.approveNote が null なら approveImplementation の第3引数は undefined（現行と同形）', async () => {
+  const r = row({ status: 'approving', submissionId: 's1', approveNote: null });
+  const { client } = createStubQueryClient({ rows: [r] });
+  const { core, calls: coreCalls } = createStubCore({
+    async approveImplementation() {
+      return { phase: 'building' };
+    },
+  });
+  await tick({ client, core, now: () => new Date('2026-08-25T00:01:00Z') });
+  assert.deepEqual(coreCalls.approveImplementation[0], ['proj_1', 's1', undefined]);
+});
+
+// ── サイクル1.19 S5: devlogPath の取りこぼし修正 ─────────────────────────────
+
+test('159. tick: getBuildStatus が devlogPath を返せば building -> done の patch に devlogPath が入る', async () => {
+  const r = row({ status: 'building', submissionId: 's1' });
+  const { client, calls } = createStubQueryClient({ rows: [r] });
+  const { core } = createStubCore({
+    async getBuildStatus() {
+      return { done: true, phase: 'succeeded', buildId: 'build_9', devlogPath: 'doc/devlog/x.md' };
+    },
+  });
+  const report = await tick({ client, core, now: () => new Date('2026-08-25T00:01:00Z') });
+  assert.equal(report.rows[0].outcome, 'transitioned');
+  const transitionCall = calls.updateMany.find((c) => 'status' in c.data);
+  assert.equal(transitionCall!.data.status, 'done');
+  assert.equal(transitionCall!.data.devlogPath, 'doc/devlog/x.md');
 });

@@ -136,7 +136,7 @@ export function App() {
     setSendDisabled(true);
     try {
       try {
-        await api.orchestrate(selectedThreadId, content);
+        await api.orchestrate(selectedThreadId, content, selectedProjectIds);
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
           // orchestrate 未提供（DISPATCH_WORKER_MODE=off）。メッセージのみ記録する。

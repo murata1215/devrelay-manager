@@ -9,7 +9,7 @@
  * 状態遷移は必ず transitionDispatch（dispatch-state.ts の遷移表を通る）経由で行う。
  */
 import { transitionDispatch } from './dispatch-store.js';
-import type { DispatchClient } from './dispatch-store.js';
+import type { DispatchClient, DispatchPatch } from './dispatch-store.js';
 import type { DispatchStatus } from './dispatch-state.js';
 import { classifyPlanResult } from './core-result.js';
 import { composeInstruction, assertGovernanceApplied } from './governance.js';
@@ -31,6 +31,8 @@ export interface ApproveTargetInput {
   id: string;
   projectId: string;
   instruction: string;
+  /** サイクル1.19 S2: 指定時のみ投げ先を差し替える（未指定なら projectId のまま）。 */
+  newProjectId?: string;
 }
 
 /**
@@ -69,24 +71,34 @@ export async function approveTarget(
     };
   }
 
+  // サイクル1.19 S2: newProjectId が指定されていれば、それを実効の投げ先として扱う。
+  // freshCheck は実効 projectId に対して行う。
+  const effectiveProjectId = input.newProjectId ?? input.projectId;
+
   const projects = await deps.core.listProjects();
-  const exists = projects.some((p) => p.id === input.projectId);
+  const exists = projects.some((p) => p.id === effectiveProjectId);
   if (!exists) {
     return {
       ok: false,
       code: 'fresh_check',
-      reason: `projectId="${input.projectId}" は core の list_projects に見つかりません（freshCheck 失敗）。`,
+      reason: `projectId="${effectiveProjectId}" は core の list_projects に見つかりません（freshCheck 失敗）。`,
     };
   }
 
   const instruction = composeInstruction(input.instruction, deps.settings);
   assertGovernanceApplied(instruction, deps.settings);
 
+  const patch: DispatchPatch = { instruction };
+  if (input.newProjectId !== undefined) {
+    // 差し替えがある場合のみ patch に projectId を含める（未指定時は現行と同形の UPDATE data を保つ）。
+    patch.projectId = effectiveProjectId;
+  }
+
   await transitionDispatch(deps.client, {
     id: input.id,
     from: 'draft',
     to: 'submitting',
-    patch: { instruction },
+    patch,
     at: deps.now?.(),
   });
   return { ok: true, instruction };
@@ -103,6 +115,8 @@ export function approveTargetHttpStatus(result: ApproveTargetResult): 200 | 400 
 export interface ApprovePlanInput {
   id: string;
   submissionId: string;
+  /** サイクル1.19 S3: 人間の自由記述（案B/案C 等）。worker が approveImplementation の note に渡す。 */
+  note?: string;
 }
 
 export type ApprovePlanResult =
@@ -132,11 +146,16 @@ export async function approvePlan(deps: GateDeps, input: ApprovePlanInput): Prom
     return { outcome: 'stale' };
   }
   if (classified.kind === 'ready') {
+    // サイクル1.19 S3: note がある時だけ approveNote を patch に含める（未指定時は現行と同形）。
+    const patch: DispatchPatch = { submissionId: input.submissionId };
+    if (input.note !== undefined) {
+      patch.approveNote = input.note;
+    }
     await transitionDispatch(deps.client, {
       id: input.id,
       from: 'awaiting_approval',
       to: 'approving',
-      patch: { submissionId: input.submissionId },
+      patch,
       at: deps.now?.(),
     });
     return { outcome: 'approved' };

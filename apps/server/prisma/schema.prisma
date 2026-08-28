@@ -60,6 +60,9 @@ model Dispatch {
   statusReason    String?
   lastPolledAt    DateTime?
   devlogPath      String?
+  /// サイクル1.19 S3: ゲート②承認時に人間が任意で残す自由記述（core の approve_implementation
+  /// へ note として伝える。案B/案C 等の指定チャネル）。未指定時は null のまま。
+  approveNote     String?
   cost            Float?
   /// サイクル1.11 ③-3: doc/orchestrator-layer3-design.md §6 D3「選択値は Dispatch と
   /// Message に記録（監査・コスト按分のため）」に基づく加算列。orchestrator LLM 層

@@ -32,6 +32,8 @@ export interface DispatchDetail {
   statusReason: string | null;
   lastPolledAt: Date | null;
   devlogPath: string | null;
+  /** サイクル1.19 S3: ゲート②承認時の自由記述。 */
+  approveNote: string | null;
   cost: number | null;
   tier: string | null;
   model: string | null;
@@ -65,6 +67,7 @@ export function serializeDispatch(row: DispatchDetail): DispatchDetail {
     statusReason: row.statusReason,
     lastPolledAt: row.lastPolledAt,
     devlogPath: row.devlogPath,
+    approveNote: row.approveNote,
     cost: row.cost,
     tier: row.tier,
     model: row.model,

@@ -94,3 +94,45 @@ export function canCancel(status: string): boolean {
 export function shouldPoll(dispatches: { status: string }[]): boolean {
   return dispatches.some((d) => !isTerminalStatus(d.status));
 }
+
+/** done カードの1行分（ラベルと表示値）。 */
+export interface DoneRow {
+  label: string;
+  value: string;
+}
+
+/** done カードに表示しうる項目の定義（ラベルと値の取り出し方）。 */
+const DONE_ROW_DEFS: { label: string; pick: (d: DoneDispatchLike) => string | number | null | undefined }[] = [
+  { label: 'submissionId', pick: (d) => d.submissionId },
+  { label: 'buildId', pick: (d) => d.buildId },
+  { label: 'devlogPath', pick: (d) => d.devlogPath },
+  { label: 'inputTokens', pick: (d) => d.inputTokens },
+  { label: 'outputTokens', pick: (d) => d.outputTokens },
+  { label: 'responseModel', pick: (d) => d.responseModel },
+];
+
+/** doneRowsOf が受け取る Dispatch の最小形（DispatchDto の部分集合）。 */
+export interface DoneDispatchLike {
+  submissionId: string | null;
+  buildId: string | null;
+  devlogPath: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  responseModel: string | null;
+}
+
+/**
+ * done カードに表示する行を組み立てる（サイクル1.19 W4）。
+ * null / undefined / 空文字の項目は行ごと除外し、`?? '-'` の表示ノイズを無くす。
+ */
+export function doneRowsOf(dispatch: DoneDispatchLike): DoneRow[] {
+  const rows: DoneRow[] = [];
+  for (const def of DONE_ROW_DEFS) {
+    const value = def.pick(dispatch);
+    if (value === null || value === undefined || value === '') {
+      continue;
+    }
+    rows.push({ label: def.label, value: String(value) });
+  }
+  return rows;
+}

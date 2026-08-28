@@ -63,8 +63,14 @@ const workerCore = {
   getBuildStatus: coreClient.getBuildStatus,
 };
 
-const approveTargetSchema = z.object({ instruction: z.string().min(1) });
+// サイクル1.19 S2: projectId は任意。指定時のみ投げ先を差し替える。
+const approveTargetSchema = z.object({
+  instruction: z.string().min(1),
+  projectId: z.string().min(1).optional(),
+});
 const cancelSchema = z.object({ reason: z.string().min(1) });
+// サイクル1.19 S3: note は任意の自由記述。body 無し/{} は現行どおり許容する。
+const approvePlanSchema = z.object({ note: z.string().optional() }).default({});
 
 export async function dispatchRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/dispatch/:id', async (request, reply) => {
@@ -120,7 +126,12 @@ export async function dispatchRoutes(app: FastifyInstance) {
       const settings = readManagerSettingsFile();
       const result = await approveTarget(
         { client: dispatchClient, core: gateCore, settings },
-        { id: row.id, projectId: row.projectId, instruction: parsed.data.instruction }
+        {
+          id: row.id,
+          projectId: row.projectId,
+          instruction: parsed.data.instruction,
+          newProjectId: parsed.data.projectId,
+        }
       );
       if (!result.ok) {
         return reply.status(approveTargetHttpStatus(result)).send({ error: result.reason });
@@ -133,6 +144,11 @@ export async function dispatchRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { id: string } }>('/dispatch/:id/approve-plan', async (request, reply) => {
+    // body 無し（undefined）でも許容する（.default({}) が受け止める）。
+    const parsed = approvePlanSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.flatten() });
+    }
     const row = await prisma.dispatch.findUnique({ where: { id: request.params.id } });
     if (!row) {
       return reply.status(404).send({ error: 'dispatch not found' });
@@ -143,7 +159,7 @@ export async function dispatchRoutes(app: FastifyInstance) {
     try {
       const result = await approvePlan(
         { client: dispatchClient, core: gateCore },
-        { id: row.id, submissionId: row.submissionId }
+        { id: row.id, submissionId: row.submissionId, note: parsed.data.note }
       );
       return reply.status(200).send(result);
     } catch (err) {

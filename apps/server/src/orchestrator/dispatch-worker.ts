@@ -47,7 +47,8 @@ const AT_MOST_ONCE_STATUSES: readonly DispatchStatus[] = DISPATCH_STATUSES.filte
 export interface WorkerCoreClient {
   submitInstruction(projectId: string, instruction: string): Promise<{ submissionId: string }>;
   getPlan(submissionId: string): Promise<unknown>;
-  approveImplementation(projectId: string, submissionId: string): Promise<unknown>;
+  /** サイクル1.19 S3: note は省略可（未指定なら approveNote 無しの従来呼び出しと同形）。 */
+  approveImplementation(projectId: string, submissionId: string, note?: string): Promise<unknown>;
   getBuildStatus(submissionId: string): Promise<unknown>;
 }
 
@@ -279,7 +280,8 @@ async function handleApproveImplementation(
     return { id: row.id, status, outcome: 'error', detail: 'submissionId が未設定です（不変条件違反）' };
   }
   try {
-    await deps.core.approveImplementation(row.projectId, row.submissionId);
+    // サイクル1.19 S3: approveNote が null の行は従来どおり第3引数省略（undefined）で呼ぶ。
+    await deps.core.approveImplementation(row.projectId, row.submissionId, row.approveNote ?? undefined);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     deps.log?.(`dispatch: approveImplementation 呼び出しでエラー（id=${row.id}）: ${detail}`);
@@ -321,6 +323,8 @@ async function handlePollBuildStatus(
   if (classified.kind === 'succeeded') {
     const patch: DispatchPatch = { submissionId: row.submissionId };
     if (classified.buildId) patch.buildId = classified.buildId;
+    // サイクル1.19 S5: devlogPath は取れた時だけ patch に含める（core が返さない場合は従来どおり）。
+    if (classified.devlogPath) patch.devlogPath = classified.devlogPath;
     const ok = await tryTransitionDispatch(deps.client, {
       id: row.id,
       from: 'building',
@@ -333,6 +337,7 @@ async function handlePollBuildStatus(
   if (classified.kind === 'failed') {
     const patch: DispatchPatch = {};
     if (classified.buildId) patch.buildId = classified.buildId;
+    if (classified.devlogPath) patch.devlogPath = classified.devlogPath;
     const ok = await tryTransitionDispatch(deps.client, {
       id: row.id,
       from: 'building',

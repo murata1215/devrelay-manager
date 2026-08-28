@@ -72,6 +72,11 @@ export interface OrchestrateInput {
   managerRepoPath: string;
   intent?: Intent | null;
   tierOverride?: Tier | null;
+  /**
+   * サイクル1.19 S1: ルート（web）が渡すプロジェクト候補ヒント。あくまでヒントであり、
+   * 候補一覧（candidates）に存在しない id は無視する（エラーにしない）。
+   */
+  preferredProjectIds?: readonly string[];
 }
 
 export type OrchestrateResult =
@@ -122,15 +127,31 @@ function parseLlmOutput(raw: string): { ok: true; value: LlmOutput } | { ok: fal
   return { ok: true, value: result.data };
 }
 
-function buildSystemPrompt(candidates: readonly ProjectCandidate[]): string {
+/**
+ * サイクル1.19 S1: preferred が空/未指定なら拡張前と1バイトも変わらない文字列を返す
+ * （後方互換をテストで固定する）。候補に存在しない id は無視する（ヒントに過ぎないため）。
+ */
+function buildSystemPrompt(
+  candidates: readonly ProjectCandidate[],
+  preferred?: readonly string[]
+): string {
   const candidateList = candidates
     .map((c) => `- id=${c.projectId} name=${c.name} path=${c.path} online=${c.online}`)
     .join('\n');
-  return (
+  const base =
     '以下は候補プロジェクトの一覧です。ユーザー発話が特定リポジトリへの作業依頼なら ' +
     '{"kind":"dispatch","projectId":"...","intent":"plan"|"exec"|"background"|null,"body":"..."} を、' +
     '純粋な会話・質問なら {"kind":"conversation","reply":"..."} を厳密な JSON のみで返してください。\n' +
-    candidateList
+    candidateList;
+
+  const validPreferred = (preferred ?? []).filter((id) => candidates.some((c) => c.projectId === id));
+  if (validPreferred.length === 0) {
+    return base;
+  }
+  return (
+    base +
+    '\nユーザーは次を候補として選択しています: ' +
+    validPreferred.join(', ')
   );
 }
 
@@ -146,7 +167,7 @@ export async function orchestrate(deps: OrchestrateDeps, input: OrchestrateInput
 
   const completion = await deps.llm.complete({
     model: resolveModel(resolveTier(input.intent ?? null, input.tierOverride ?? null), deps.settings),
-    system: buildSystemPrompt(input.candidates),
+    system: buildSystemPrompt(input.candidates, input.preferredProjectIds),
     user: input.content,
   });
 

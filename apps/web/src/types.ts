@@ -45,6 +45,8 @@ export interface DispatchDto {
   statusReason: string | null;
   lastPolledAt: string | null;
   devlogPath: string | null;
+  /** サイクル1.19 S3: ゲート②承認時に人間が任意で残す自由記述。 */
+  approveNote: string | null;
   cost: number | null;
   tier: string | null;
   model: string | null;

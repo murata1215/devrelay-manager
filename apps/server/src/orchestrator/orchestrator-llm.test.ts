@@ -49,6 +49,26 @@ function llmReturning(raw: string, overrides: Partial<Omit<LlmCompletion, 'text'
   return { complete: async () => completion };
 }
 
+/**
+ * サイクル1.19 S1: buildSystemPrompt は非公開関数のため、orchestrate() 経由で
+ * complete() に渡される system 文字列を記録して検証する。
+ */
+function capturingLlm(raw: string): { llm: LlmPort; systems: string[] } {
+  const systems: string[] = [];
+  const completion: LlmCompletion = {
+    text: raw,
+    model: 'claude-sonnet-5',
+    usage: { inputTokens: 1, outputTokens: 1 },
+  };
+  const llm: LlmPort = {
+    async complete(request) {
+      systems.push(request.system);
+      return completion;
+    },
+  };
+  return { llm, systems };
+}
+
 function recordingSink(): { sink: DraftSink; calls: DraftCreateInput[] } {
   const calls: DraftCreateInput[] = [];
   const sink: DraftSink = {
@@ -209,4 +229,47 @@ test('118. orchestrate: conversation 時も usage/responseModel を結果に含�
     assert.deepEqual(result.usage, { inputTokens: 10, outputTokens: 20 });
     assert.equal(result.responseModel, 'claude-haiku-4-5-20251001');
   }
+});
+
+// ── サイクル1.19 S1: orchestrate に projectIds（preferredProjectIds）ヒントを追加 ──
+
+/** buildSystemPrompt 拡張前と1バイトも変わらないことを固定するための期待値（手計算）。 */
+function expectedBaseSystemPrompt(): string {
+  const candidateList = candidates()
+    .map((c) => `- id=${c.projectId} name=${c.name} path=${c.path} online=${c.online}`)
+    .join('\n');
+  return (
+    '以下は候補プロジェクトの一覧です。ユーザー発話が特定リポジトリへの作業依頼なら ' +
+    '{"kind":"dispatch","projectId":"...","intent":"plan"|"exec"|"background"|null,"body":"..."} を、' +
+    '純粋な会話・質問なら {"kind":"conversation","reply":"..."} を厳密な JSON のみで返してください。\n' +
+    candidateList
+  );
+}
+
+test('147. orchestrate: preferredProjectIds 未指定なら system prompt が拡張前と1バイトも変わらない（後方互換の固定）', async () => {
+  const { sink } = recordingSink();
+  const { llm, systems } = capturingLlm(JSON.stringify({ kind: 'conversation', reply: 'こんにちは' }));
+  const deps: OrchestrateDeps = { llm, draft: sink, settings: settings() };
+  await orchestrate(deps, baseInput());
+  assert.equal(systems.length, 1);
+  assert.equal(systems[0], expectedBaseSystemPrompt());
+});
+
+test('148. orchestrate: preferredProjectIds 指定でプロンプトに選択ヒントが追記される', async () => {
+  const { sink } = recordingSink();
+  const { llm, systems } = capturingLlm(JSON.stringify({ kind: 'conversation', reply: 'こんにちは' }));
+  const deps: OrchestrateDeps = { llm, draft: sink, settings: settings() };
+  await orchestrate(deps, baseInput({ preferredProjectIds: ['proj-1'] }));
+  assert.equal(systems.length, 1);
+  assert.ok(systems[0].startsWith(expectedBaseSystemPrompt()));
+  assert.ok(systems[0].includes('ユーザーは次を候補として選択しています: proj-1'));
+});
+
+test('149. orchestrate: 候補に無い projectIds は無視され、system prompt は拡張前と同一のままクラッシュしない', async () => {
+  const { sink } = recordingSink();
+  const { llm, systems } = capturingLlm(JSON.stringify({ kind: 'conversation', reply: 'こんにちは' }));
+  const deps: OrchestrateDeps = { llm, draft: sink, settings: settings() };
+  const result = await orchestrate(deps, baseInput({ preferredProjectIds: ['not-a-candidate'] }));
+  assert.equal(result.kind, 'conversation');
+  assert.equal(systems[0], expectedBaseSystemPrompt());
 });

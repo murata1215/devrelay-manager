@@ -6,6 +6,7 @@ import {
   cardKindFor,
   canCancel,
   shouldPoll,
+  doneRowsOf,
 } from './dispatch-status.js';
 
 // apps/server/src/orchestrator/dispatch-state.ts の DISPATCH_STATUSES と
@@ -61,4 +62,38 @@ test('12. canCancel: 非終端 true・終端 false', () => {
   assert.equal(canCancel('done'), false);
   assert.equal(canCancel('failed'), false);
   assert.equal(canCancel('stopped'), false);
+});
+
+test('19. doneRowsOf: null/undefined/空文字の項目は行ごと除外される', () => {
+  const rows = doneRowsOf({
+    submissionId: 'sub-1',
+    buildId: null,
+    devlogPath: '',
+    inputTokens: 100,
+    outputTokens: null,
+    responseModel: 'claude-sonnet-5',
+  });
+  assert.deepEqual(
+    rows.map((r) => r.label),
+    ['submissionId', 'inputTokens', 'responseModel']
+  );
+});
+
+test('20. doneRowsOf: 値のある項目のみラベルと文字列化した値で返す', () => {
+  const rows = doneRowsOf({
+    submissionId: 'sub-1',
+    buildId: 'build-1',
+    devlogPath: 'doc/devlog/a.md',
+    inputTokens: 111,
+    outputTokens: 222,
+    responseModel: 'claude-sonnet-5',
+  });
+  assert.deepEqual(rows, [
+    { label: 'submissionId', value: 'sub-1' },
+    { label: 'buildId', value: 'build-1' },
+    { label: 'devlogPath', value: 'doc/devlog/a.md' },
+    { label: 'inputTokens', value: '111' },
+    { label: 'outputTokens', value: '222' },
+    { label: 'responseModel', value: 'claude-sonnet-5' },
+  ]);
 });
