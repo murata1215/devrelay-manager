@@ -24,6 +24,7 @@ function dispatch(id: string, createdAt: string, status = 'draft'): DispatchDto 
     lastPolledAt: null,
     devlogPath: null,
     approveNote: null,
+    council: false,
     cost: null,
     tier: null,
     model: null,

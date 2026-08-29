@@ -14,6 +14,7 @@ import {
   canCancel,
   doneRowsOf,
   approveNoteOf,
+  councilBadgeOf,
 } from '../lib/dispatch-status.js';
 import { splitPlanNoise } from '../lib/plan-text.js';
 import * as api from '../api.js';
@@ -39,6 +40,7 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
   const label = DISPATCH_STATUS_LABELS[dispatch.status] ?? `不明な状態（${dispatch.status}）`;
   const projectName = resolveProjectName(dispatch.projectId, projects);
   const approveNote = approveNoteOf(dispatch);
+  const councilBadge = councilBadgeOf(dispatch);
 
   const [instruction, setInstruction] = useState(dispatch.instruction ?? '');
   const [targetProjectId, setTargetProjectId] = useState(dispatch.projectId);
@@ -99,6 +101,7 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
     <div className="dispatch-card">
       <div className="dispatch-card__header">
         <span className={`badge badge--${tone}`}>{label}</span>
+        {councilBadge && <span className="badge badge--council">{councilBadge}</span>}
         <span className="dispatch-card__project">{projectName}</span>
         {dispatch.tier && <span className="dispatch-card__meta">tier: {dispatch.tier}</span>}
         {dispatch.model && <span className="dispatch-card__meta">model: {dispatch.model}</span>}

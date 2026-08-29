@@ -281,6 +281,10 @@ body {
   background: #555;
 }
 
+.badge--council {
+  background: #6b4fbb;
+}
+
 .composer {
   border-top: 1px solid #ddd;
   background: #fff;
@@ -306,7 +310,8 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #888;
+  /* サイクル1.21で実結線したため、無効化されて見える淡色（#888）から通常色へ戻す。 */
+  color: #333;
   font-size: 0.85em;
 }
 

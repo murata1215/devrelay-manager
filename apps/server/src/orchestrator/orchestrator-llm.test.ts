@@ -273,3 +273,17 @@ test('149. orchestrate: 候補に無い projectIds は無視され、system prom
   assert.equal(result.kind, 'conversation');
   assert.equal(systems[0], expectedBaseSystemPrompt());
 });
+
+test('164. orchestrate: input.council 未指定なら createDraft 引数に council キーが来ない、true なら来る（サイクル1.21）', async () => {
+  const dispatchJson = JSON.stringify({ kind: 'dispatch', projectId: 'proj-1', intent: 'exec', body: '本文' });
+
+  const { sink: sinkOff, calls: callsOff } = recordingSink();
+  const depsOff: OrchestrateDeps = { llm: llmReturning(dispatchJson), draft: sinkOff, settings: settings() };
+  await orchestrate(depsOff, baseInput());
+  assert.equal('council' in callsOff[0], false);
+
+  const { sink: sinkOn, calls: callsOn } = recordingSink();
+  const depsOn: OrchestrateDeps = { llm: llmReturning(dispatchJson), draft: sinkOn, settings: settings() };
+  await orchestrate(depsOn, baseInput({ council: true }));
+  assert.equal(callsOn[0].council, true);
+});

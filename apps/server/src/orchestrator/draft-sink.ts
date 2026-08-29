@@ -32,6 +32,11 @@ export interface DraftCreateInput {
   outputTokens?: number | null;
   /** API が実際に使用したと申告したモデルID（要求値 model との突き合わせ用）。 */
   responseModel?: string | null;
+  /**
+   * サイクル1.21: claude↔codex の協議（council）を有効化するオプトイン。
+   * 未指定時は Prisma の `@default(false)` に委ねる（省略可能）。
+   */
+  council?: boolean;
 }
 
 export interface CreatedDraft {
@@ -54,6 +59,7 @@ interface DispatchCreateArgs {
     inputTokens?: number | null;
     outputTokens?: number | null;
     responseModel?: string | null;
+    council?: boolean;
   };
 }
 
@@ -73,19 +79,23 @@ export interface DraftCreateClient {
 export function prismaDraftSink(client: DraftCreateClient): DraftSink {
   return {
     async createDraft(input: DraftCreateInput): Promise<CreatedDraft> {
-      const row = await client.create({
-        data: {
-          threadId: input.threadId,
-          messageId: input.messageId ?? null,
-          projectId: input.projectId,
-          instruction: input.instruction,
-          tier: input.tier,
-          model: input.model,
-          inputTokens: input.inputTokens ?? null,
-          outputTokens: input.outputTokens ?? null,
-          responseModel: input.responseModel ?? null,
-        },
-      });
+      const data: DispatchCreateArgs['data'] = {
+        threadId: input.threadId,
+        messageId: input.messageId ?? null,
+        projectId: input.projectId,
+        instruction: input.instruction,
+        tier: input.tier,
+        model: input.model,
+        inputTokens: input.inputTokens ?? null,
+        outputTokens: input.outputTokens ?? null,
+        responseModel: input.responseModel ?? null,
+      };
+      // サイクル1.21: council が true のときだけキーを足す。未指定/false のときは
+      // 従来と完全同形の data（キー集合）を保ち、Prisma の @default(false) に委ねる。
+      if (input.council === true) {
+        data.council = true;
+      }
+      const row = await client.create({ data });
       return { id: row.id };
     },
   };

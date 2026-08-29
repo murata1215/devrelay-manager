@@ -45,7 +45,12 @@ const AT_MOST_ONCE_STATUSES: readonly DispatchStatus[] = DISPATCH_STATUSES.filte
 
 /** worker が core に対して呼ぶ最小限の RPC 面。core/coreClient.ts の該当関数がこれを満たす。 */
 export interface WorkerCoreClient {
-  submitInstruction(projectId: string, instruction: string): Promise<{ submissionId: string }>;
+  /** サイクル1.21: council は省略可（未指定なら council 無しの従来呼び出しと同形）。 */
+  submitInstruction(
+    projectId: string,
+    instruction: string,
+    council?: boolean
+  ): Promise<{ submissionId: string }>;
   getPlan(submissionId: string): Promise<unknown>;
   /** サイクル1.19 S3: note は省略可（未指定なら approveNote 無しの従来呼び出しと同形）。 */
   approveImplementation(projectId: string, submissionId: string, note?: string): Promise<unknown>;
@@ -193,7 +198,8 @@ async function handleSubmitInstruction(
   }
   let result: { submissionId: string };
   try {
-    result = await deps.core.submitInstruction(row.projectId, row.instruction);
+    // サイクル1.21: council=true の行だけ第3引数に true を渡す（従来行は undefined で従来同形）。
+    result = await deps.core.submitInstruction(row.projectId, row.instruction, row.council ? true : undefined);
   } catch (err) {
     // at-most-once: 結果不明。ここで stopped にはしない（実は成功している可能性がある）。
     // lastPolledAt は claim 済みなので、この行は以後 tick から見えなくなり、

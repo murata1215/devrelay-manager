@@ -146,3 +146,12 @@ export function approveNoteOf(dispatch: { approveNote: string | null }): string 
   const trimmed = dispatch.approveNote?.trim() ?? '';
   return trimmed === '' ? null : trimmed;
 }
+
+/**
+ * council バッジの表示要否と表示ラベルを1つにまとめる（サイクル1.21 W3）。
+ * approveNoteOf と同じ「値が無ければ出さない」思想。true のときだけ 'council' を返し、
+ * false / null / undefined はすべて null（バッジ非表示）にする。
+ */
+export function councilBadgeOf(dispatch: { council?: boolean | null }): string | null {
+  return dispatch.council === true ? 'council' : null;
+}

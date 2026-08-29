@@ -14,6 +14,7 @@ import type {
   GateOutcomeDto,
 } from './types.js';
 import { buildApprovePlanBody } from './lib/approve-plan-body.js';
+import { buildOrchestrateBody } from './lib/orchestrate-body.js';
 
 /** API ベース URL。既定は manager サーバーのローカル既定ポート 3100。 */
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:3100';
@@ -121,19 +122,18 @@ export function listProjects(): Promise<CoreProjectDto[]> {
  * 呼び出し側で事前に POST /messages を叩いてはいけない（二重投稿になる）。
  * projectIds はサイクル1.19 S1 で追加された選択ヒント。未指定/空なら送らない
  * （サーバー側の後方互換な扱いに合わせる）。
+ * council はサイクル1.21 で追加された協議トグル。true のときだけ送る
+ * （body 組み立ては lib/orchestrate-body.ts に切り出しテスト可能にしている）。
  */
 export function orchestrate(
   threadId: string,
   content: string,
-  projectIds?: string[]
+  projectIds?: string[],
+  council?: boolean
 ): Promise<OrchestrateResultDto> {
-  const body: { content: string; projectIds?: string[] } = { content };
-  if (projectIds && projectIds.length > 0) {
-    body.projectIds = projectIds;
-  }
   return request<OrchestrateResultDto>(`/threads/${threadId}/orchestrate`, {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: buildOrchestrateBody(content, projectIds, council),
   });
 }
 

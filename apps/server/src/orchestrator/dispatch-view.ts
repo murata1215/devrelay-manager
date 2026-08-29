@@ -34,6 +34,8 @@ export interface DispatchDetail {
   devlogPath: string | null;
   /** サイクル1.19 S3: ゲート②承認時の自由記述。 */
   approveNote: string | null;
+  /** サイクル1.21: claude↔codex の協議（council）を有効化して投入したかどうか。 */
+  council: boolean;
   cost: number | null;
   tier: string | null;
   model: string | null;
@@ -68,6 +70,7 @@ export function serializeDispatch(row: DispatchDetail): DispatchDetail {
     lastPolledAt: row.lastPolledAt,
     devlogPath: row.devlogPath,
     approveNote: row.approveNote,
+    council: row.council,
     cost: row.cost,
     tier: row.tier,
     model: row.model,

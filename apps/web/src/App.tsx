@@ -129,14 +129,14 @@ export function App() {
     }
   }
 
-  async function handleSend(content: string) {
+  async function handleSend(content: string, council: boolean) {
     if (!selectedThreadId) {
       return;
     }
     setSendDisabled(true);
     try {
       try {
-        await api.orchestrate(selectedThreadId, content, selectedProjectIds);
+        await api.orchestrate(selectedThreadId, content, selectedProjectIds, council);
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
           // orchestrate 未提供（DISPATCH_WORKER_MODE=off）。メッセージのみ記録する。

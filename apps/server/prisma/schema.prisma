@@ -63,6 +63,10 @@ model Dispatch {
   /// サイクル1.19 S3: ゲート②承認時に人間が任意で残す自由記述（core の approve_implementation
   /// へ note として伝える。案B/案C 等の指定チャネル）。未指定時は null のまま。
   approveNote     String?
+  /// サイクル1.21: claude↔codex の協議（council）を有効化して投入したかどうか。
+  /// 既定 false（オプトイン、default OFF）。core の submit_instruction はまだ council を
+  /// 受け取らないため、現時点では manager 側の記録・表示にのみ使う（doc/devlog 参照）。
+  council         Boolean   @default(false)
   cost            Float?
   /// サイクル1.11 ③-3: doc/orchestrator-layer3-design.md §6 D3「選択値は Dispatch と
   /// Message に記録（監査・コスト按分のため）」に基づく加算列。orchestrator LLM 層

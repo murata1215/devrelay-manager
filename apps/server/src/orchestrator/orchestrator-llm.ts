@@ -77,6 +77,12 @@ export interface OrchestrateInput {
    * 候補一覧（candidates）に存在しない id は無視する（エラーにしない）。
    */
   preferredProjectIds?: readonly string[];
+  /**
+   * サイクル1.21: claude↔codex の協議（council）を有効化するオプトイン。
+   * true のときだけ draft.createDraft へ渡す（未指定/false は draft 側の
+   * @default(false) に委ねる。1.20 の approveNote と同じ「明示時だけ含める」流儀）。
+   */
+  council?: boolean;
 }
 
 export type OrchestrateResult =
@@ -210,6 +216,8 @@ export async function orchestrate(deps: OrchestrateDeps, input: OrchestrateInput
     inputTokens: completion.usage.inputTokens,
     outputTokens: completion.usage.outputTokens,
     responseModel: completion.model,
+    // サイクル1.21: true のときだけ含める。未指定/false は既存と同形の呼び出しを保つ。
+    ...(input.council === true ? { council: true } : {}),
   });
 
   return {

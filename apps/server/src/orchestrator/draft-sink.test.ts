@@ -67,3 +67,42 @@ test('119. prismaDraftSink: usage 3列（inputTokens/outputTokens/responseModel�
   assert.equal(capturedData?.responseModel, 'claude-sonnet-5');
   assert.equal('status' in (capturedData as object), false);
 });
+
+test('162. prismaDraftSink: council 未指定なら create の data に council キーが含まれない（サイクル1.21 以前と同形）', async () => {
+  let capturedData: Record<string, unknown> | undefined;
+  const stubClient: DraftCreateClient = {
+    async create(args) {
+      capturedData = args.data as unknown as Record<string, unknown>;
+      return { id: 'dispatch-council-off' };
+    },
+  };
+  const sink = prismaDraftSink(stubClient);
+  await sink.createDraft({
+    threadId: 't1',
+    projectId: 'p1',
+    instruction: '本文',
+    tier: 'standard',
+    model: 'claude-sonnet-5',
+  });
+  assert.equal('council' in (capturedData as object), false);
+});
+
+test('163. prismaDraftSink: council: true を渡すと create の data.council が true になる（サイクル1.21）', async () => {
+  let capturedData: Record<string, unknown> | undefined;
+  const stubClient: DraftCreateClient = {
+    async create(args) {
+      capturedData = args.data as unknown as Record<string, unknown>;
+      return { id: 'dispatch-council-on' };
+    },
+  };
+  const sink = prismaDraftSink(stubClient);
+  await sink.createDraft({
+    threadId: 't1',
+    projectId: 'p1',
+    instruction: '本文',
+    tier: 'standard',
+    model: 'claude-sonnet-5',
+    council: true,
+  });
+  assert.equal(capturedData?.council, true);
+});

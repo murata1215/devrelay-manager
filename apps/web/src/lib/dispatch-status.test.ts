@@ -8,6 +8,7 @@ import {
   shouldPoll,
   doneRowsOf,
   approveNoteOf,
+  councilBadgeOf,
 } from './dispatch-status.js';
 
 // apps/server/src/orchestrator/dispatch-state.ts の DISPATCH_STATUSES と
@@ -108,4 +109,12 @@ test('24. approveNoteOf: null/空文字/空白のみはすべて null を返す'
 test('25. approveNoteOf: 値がある場合は trim 済み文字列を返す', () => {
   assert.equal(approveNoteOf({ approveNote: '案B採用で進めてください' }), '案B採用で進めてください');
   assert.equal(approveNoteOf({ approveNote: '  前後に空白  ' }), '前後に空白');
+});
+
+test('29. councilBadgeOf: false/null/undefined は null、true は "council" を返す', () => {
+  assert.equal(councilBadgeOf({ council: false }), null);
+  assert.equal(councilBadgeOf({ council: null }), null);
+  assert.equal(councilBadgeOf({ council: undefined }), null);
+  assert.equal(councilBadgeOf({}), null);
+  assert.equal(councilBadgeOf({ council: true }), 'council');
 });

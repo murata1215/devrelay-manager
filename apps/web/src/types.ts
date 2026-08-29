@@ -29,7 +29,7 @@ export interface MessageDto {
 }
 
 /**
- * Dispatch（per-repo の1サイクル）。20列すべて。
+ * Dispatch（per-repo の1サイクル）。21列すべて。
  * apps/server/src/orchestrator/dispatch-view.ts の DispatchDetail と1:1。
  */
 export interface DispatchDto {
@@ -47,6 +47,8 @@ export interface DispatchDto {
   devlogPath: string | null;
   /** サイクル1.19 S3: ゲート②承認時に人間が任意で残す自由記述。 */
   approveNote: string | null;
+  /** サイクル1.21: claude↔codex の協議（council）を有効化して投入したかどうか。既定 false。 */
+  council: boolean;
   cost: number | null;
   tier: string | null;
   model: string | null;

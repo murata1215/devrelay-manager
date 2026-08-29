@@ -43,6 +43,9 @@ const orchestrateSchema = z.object({
   // サイクル1.19 S1: web の project 選択をヒントとして渡す任意フィールド。
   // 候補外の id は無視する（orchestrator-llm.ts 側で処理）。未指定時は挙動不変。
   projectIds: z.array(z.string()).optional(),
+  // サイクル1.21: claude↔codex の協議（council）を有効化するオプトイン。未指定/false は
+  // 従来と完全同形の挙動を保つ（Dispatch.council は @default(false)）。
+  council: z.boolean().optional(),
 });
 
 /**
@@ -139,6 +142,7 @@ export async function orchestratorRoutes(app: FastifyInstance) {
           intent,
           tierOverride,
           preferredProjectIds: parsed.data.projectIds,
+          council: parsed.data.council,
         });
         return reply.status(200).send({ messageId: message.id, result });
       } catch (err) {

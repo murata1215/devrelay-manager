@@ -44,9 +44,9 @@ function createStubCore(overrides: Partial<WorkerCoreClient> = {}): {
     getBuildStatus: [],
   };
   const core: WorkerCoreClient = {
-    async submitInstruction(projectId, instruction) {
-      calls.submitInstruction.push([projectId, instruction]);
-      if (overrides.submitInstruction) return overrides.submitInstruction(projectId, instruction);
+    async submitInstruction(projectId, instruction, council) {
+      calls.submitInstruction.push([projectId, instruction, council]);
+      if (overrides.submitInstruction) return overrides.submitInstruction(projectId, instruction, council);
       throw new Error('submitInstruction は呼ばれない想定のテストです');
     },
     async getPlan(submissionId) {
@@ -79,6 +79,7 @@ function row(overrides: Partial<DispatchListRow>): DispatchListRow {
     projectId: 'proj_1',
     instruction: null,
     approveNote: null,
+    council: false,
     ...overrides,
   };
 }
@@ -325,4 +326,28 @@ test('159. tick: getBuildStatus が devlogPath を返せば building -> done の
   const transitionCall = calls.updateMany.find((c) => 'status' in c.data);
   assert.equal(transitionCall!.data.status, 'done');
   assert.equal(transitionCall!.data.devlogPath, 'doc/devlog/x.md');
+});
+
+// ── サイクル1.21: council 結線 ────────────────────────────────────────────
+
+test('165. tick: row.council=false は submitInstruction 第3引数が undefined、true は true', async () => {
+  const rOff = row({ id: 'd1', status: 'submitting', instruction: 'x', council: false });
+  const { client: clientOff } = createStubQueryClient({ rows: [rOff] });
+  const { core: coreOff, calls: coreCallsOff } = createStubCore({
+    async submitInstruction() {
+      return { submissionId: 'sub_off' };
+    },
+  });
+  await tick({ client: clientOff, core: coreOff, now: () => new Date('2026-08-25T00:01:00Z') });
+  assert.deepEqual(coreCallsOff.submitInstruction[0], ['proj_1', 'x', undefined]);
+
+  const rOn = row({ id: 'd2', status: 'submitting', instruction: 'y', council: true });
+  const { client: clientOn } = createStubQueryClient({ rows: [rOn] });
+  const { core: coreOn, calls: coreCallsOn } = createStubCore({
+    async submitInstruction() {
+      return { submissionId: 'sub_on' };
+    },
+  });
+  await tick({ client: clientOn, core: coreOn, now: () => new Date('2026-08-25T00:01:00Z') });
+  assert.deepEqual(coreCallsOn.submitInstruction[0], ['proj_1', 'y', true]);
 });

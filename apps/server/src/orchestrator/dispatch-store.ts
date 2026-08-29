@@ -183,6 +183,8 @@ export interface DispatchListRow {
   instruction: string | null;
   /** サイクル1.19 S3: worker が approveImplementation の第3引数へ渡す。 */
   approveNote: string | null;
+  /** サイクル1.21: worker が submitInstruction の第3引数へ渡す。 */
+  council: boolean;
 }
 
 interface DispatchFindManyArgs {

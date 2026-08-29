@@ -9,6 +9,7 @@
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { buildSubmitInstructionArgs } from './submit-args.js';
 
 const CLIENT_NAME = 'devrelay-manager';
 const CLIENT_VERSION = '0.1.0';
@@ -173,12 +174,25 @@ export async function listProjects(): Promise<CoreProject[]> {
   return result.projects;
 }
 
-/** 対象プロジェクトへ指示を投入する。 */
+/**
+ * 対象プロジェクトへ指示を投入する。
+ *
+ * サイクル1.21: council は「claude↔codex の協議を有効化する」オプトイン。
+ * 【重要・実測】core の submit_instruction は現時点で council を受け取らない
+ * （tools/list の inputSchema は projectId/instruction のみ）。council が true でも
+ * 未知引数として core に静かに捨てられ、submit 自体は成功する（実測確認済み）。
+ * 引数組み立ては submit-args.ts の純関数へ切り出してあり、未指定/false のときは
+ * 従来と完全同形の呼び出しになる。
+ */
 export async function submitInstruction(
   projectId: string,
-  instruction: string
+  instruction: string,
+  council?: boolean
 ): Promise<SubmitInstructionResult> {
-  return callTool<SubmitInstructionResult>('submit_instruction', { projectId, instruction });
+  return callTool<SubmitInstructionResult>(
+    'submit_instruction',
+    buildSubmitInstructionArgs(projectId, instruction, council)
+  );
 }
 
 /** submission に紐づくプランを取得する。 */

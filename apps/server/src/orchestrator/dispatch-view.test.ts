@@ -38,6 +38,7 @@ function dummyDispatch(overrides: Partial<DispatchDetail> = {}): DispatchDetail 
     lastPolledAt: new Date('2026-08-28T00:01:00.000Z'),
     devlogPath: 'doc/devlog/x.md',
     approveNote: 'note-1',
+    council: false,
     cost: 1.23,
     tier: 'standard',
     model: 'claude-sonnet-5',
