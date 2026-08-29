@@ -208,8 +208,12 @@ body {
   font-size: 0.85em;
 }
 
-.dispatch-card__note {
-  color: #888;
+.dispatch-card__approve-note {
+  margin-top: 4px;
+  font-size: 0.85em;
+  color: #555;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .dispatch-card__plan pre {

@@ -13,6 +13,7 @@ import type {
   OrchestrateResultDto,
   GateOutcomeDto,
 } from './types.js';
+import { buildApprovePlanBody } from './lib/approve-plan-body.js';
 
 /** API ベース URL。既定は manager サーバーのローカル既定ポート 3100。 */
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:3100';
@@ -161,9 +162,16 @@ export function approveTarget(
   });
 }
 
-/** POST /dispatch/:id/approve-plan — ゲート②（プランの承認・実行開始）。 */
-export function approvePlan(dispatchId: string): Promise<GateOutcomeDto> {
-  return request(`/dispatch/${dispatchId}/approve-plan`, { method: 'POST', body: '{}' });
+/**
+ * POST /dispatch/:id/approve-plan — ゲート②（プランの承認・実行開始）。
+ * note はサイクル1.20 W1 で追加された任意の自由記述。未指定/空なら送らない
+ * （body 組み立ては lib/approve-plan-body.ts に切り出しテスト可能にしている）。
+ */
+export function approvePlan(dispatchId: string, note?: string): Promise<GateOutcomeDto> {
+  return request(`/dispatch/${dispatchId}/approve-plan`, {
+    method: 'POST',
+    body: buildApprovePlanBody(note),
+  });
 }
 
 /** POST /dispatch/:id/retry-stale — stale 状態からの再取得。 */

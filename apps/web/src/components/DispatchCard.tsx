@@ -13,6 +13,7 @@ import {
   cardKindFor,
   canCancel,
   doneRowsOf,
+  approveNoteOf,
 } from '../lib/dispatch-status.js';
 import { splitPlanNoise } from '../lib/plan-text.js';
 import * as api from '../api.js';
@@ -37,6 +38,7 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
   const tone = statusToneOf(dispatch.status);
   const label = DISPATCH_STATUS_LABELS[dispatch.status] ?? `不明な状態（${dispatch.status}）`;
   const projectName = resolveProjectName(dispatch.projectId, projects);
+  const approveNote = approveNoteOf(dispatch);
 
   const [instruction, setInstruction] = useState(dispatch.instruction ?? '');
   const [targetProjectId, setTargetProjectId] = useState(dispatch.projectId);
@@ -44,6 +46,7 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
   const [planError, setPlanError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [showNoise, setShowNoise] = useState(false);
+  const [approveNoteInput, setApproveNoteInput] = useState('');
 
   // draft カードは instruction が外から更新されたら編集欄も追随させる。
   useEffect(() => {
@@ -102,6 +105,7 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
         <span className="dispatch-card__meta">{new Date(dispatch.statusChangedAt).toLocaleString('ja-JP')}</span>
       </div>
       {dispatch.statusReason && <div className="dispatch-card__reason">{dispatch.statusReason}</div>}
+      {approveNote && <div className="dispatch-card__approve-note">承認メモ: {approveNote}</div>}
 
       {kind === 'draft' && (
         <div className="dispatch-card__body">
@@ -173,12 +177,19 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
               {!plan.planMarkdown && <p>プラン本文はまだありません（status: {plan.status}）。</p>}
             </div>
           )}
+          <textarea
+            value={approveNoteInput}
+            onChange={(e) => setApproveNoteInput(e.target.value)}
+            disabled={busy}
+            rows={2}
+            placeholder="任意: 案B採用など、承認時に agent へ伝える追記"
+          />
           <button
             type="button"
             disabled={busy}
             onClick={() =>
               void runGate('プランを承認して実行します（ゲート②）。よろしいですか？', async () => {
-                const result = await api.approvePlan(dispatch.id);
+                const result = await api.approvePlan(dispatch.id, approveNoteInput);
                 onInfo(`承認結果: ${result.outcome}${result.detail ? ` (${result.detail})` : ''}`);
               })
             }

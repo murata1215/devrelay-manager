@@ -7,6 +7,7 @@ import {
   canCancel,
   shouldPoll,
   doneRowsOf,
+  approveNoteOf,
 } from './dispatch-status.js';
 
 // apps/server/src/orchestrator/dispatch-state.ts の DISPATCH_STATUSES と
@@ -96,4 +97,15 @@ test('20. doneRowsOf: 値のある項目のみラベルと文字列化した値�
     { label: 'outputTokens', value: '222' },
     { label: 'responseModel', value: 'claude-sonnet-5' },
   ]);
+});
+
+test('24. approveNoteOf: null/空文字/空白のみはすべて null を返す', () => {
+  assert.equal(approveNoteOf({ approveNote: null }), null);
+  assert.equal(approveNoteOf({ approveNote: '' }), null);
+  assert.equal(approveNoteOf({ approveNote: '   ' }), null);
+});
+
+test('25. approveNoteOf: 値がある場合は trim 済み文字列を返す', () => {
+  assert.equal(approveNoteOf({ approveNote: '案B採用で進めてください' }), '案B採用で進めてください');
+  assert.equal(approveNoteOf({ approveNote: '  前後に空白  ' }), '前後に空白');
 });

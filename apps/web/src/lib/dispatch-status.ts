@@ -136,3 +136,13 @@ export function doneRowsOf(dispatch: DoneDispatchLike): DoneRow[] {
   }
   return rows;
 }
+
+/**
+ * 承認メモ（approveNote）の表示要否と表示値を1つにまとめる（サイクル1.20 W2）。
+ * doneRowsOf と同じ「値が無ければ出さない」思想を承認メモ単体に適用したもの。
+ * null / 空文字 / 空白のみは null を返し、呼び出し側は真偽値として使える。
+ */
+export function approveNoteOf(dispatch: { approveNote: string | null }): string | null {
+  const trimmed = dispatch.approveNote?.trim() ?? '';
+  return trimmed === '' ? null : trimmed;
+}
