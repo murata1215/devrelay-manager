@@ -224,7 +224,7 @@ export function App() {
 
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 overflow-y-auto">
-            <div className="max-w-3xl mx-auto px-6 py-6">
+            <div className="min-h-full flex flex-col justify-end max-w-3xl mx-auto px-6 py-6">
               {selectedThreadId ? (
                 <Timeline
                   messages={messages}
@@ -237,7 +237,7 @@ export function App() {
                   onInfo={(msg) => setInfoMessage(msg)}
                 />
               ) : (
-                <div className="text-muted text-center py-16">
+                <div className="m-auto text-muted text-center py-16">
                   左のスレッド一覧から選択するか、新規スレッドを作成してください。
                 </div>
               )}

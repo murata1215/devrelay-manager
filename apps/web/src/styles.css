@@ -1,9 +1,11 @@
 /*
- * サイクル1.23: Tailwind 4 導入。ここでは設計トークンの定義と、
- * DispatchCard.tsx（本サイクルでは触らない）が参照する既存クラス名の暫定移植のみを行う。
- * それ以外のレイアウト・見た目は各コンポーネントの className（Tailwind ユーティリティ）で
+ * サイクル1.23: Tailwind 4 導入。サイクル1.25: DispatchCard.tsx を全面再設計し、
+ * 暫定移植していた .dispatch-card* / .badge* ルールと --info / --council-badge
+ * トークンを廃止した（ニュートラル5役+アクセント1色+ステータス3色に統一）。
+ * レイアウト・見た目は各コンポーネントの className（Tailwind ユーティリティ）で
  * 直接指定するため、旧来の .app / .thread-list / .bubble / .composer / .project-picker 系の
- * ルールはここでは持たない（1.22 の棚卸し時点の 364 行から全面書換）。
+ * ルールはここでは持たない。ここでは設計トークンと、react-markdown 描画用の
+ * `.md` タイポグラフィ（サイクル1.25 要求A）のみを持つ。
  */
 @import "tailwindcss";
 
@@ -11,11 +13,6 @@
  * ニュートラル5役（bg/surface/border/text/muted）+ アクセント1色 + ステータス3色
  * (success/warning/danger) が基本セット。ダークモードは prefers-color-scheme で
  * ニュートラル階調を自動反転する（トグル UI は作らない）。
- *
- * 例外: DispatchCard.tsx の既存6種バッジ（wait/run/ok/ng/unknown/council）を
- * クラス名そのまま暫定移植するため、上記8色では表現できない run（進行中=青）と
- * council（協議=紫）用に --info / --council-badge の2トークンだけ追加している。
- * 1.24 で DispatchCard を再設計する際にこの例外は整理する。
  */
 :root {
   --bg: #fafafa;
@@ -29,9 +26,6 @@
   --success: #2f9e44;
   --warning: #d9822b;
   --danger: #c0392b;
-
-  --info: #0a7fd6;
-  --council-badge: #6b4fbb;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -47,9 +41,6 @@
     --success: #4cae5a;
     --warning: #e2a355;
     --danger: #e0665a;
-
-    --info: #4ea1e0;
-    --council-badge: #9c7ee0;
   }
 }
 
@@ -63,8 +54,6 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
-  --color-info: var(--info);
-  --color-council: var(--council-badge);
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP",
     sans-serif;
@@ -91,148 +80,69 @@
 }
 
 /*
- * サイクル1.23 暫定: DispatchCard.tsx を触らない制約のため、同ファイルが参照する
- * クラス名をそのまま維持し、色だけ上記トークンに置き換えた。角丸は sm/lg の2段階に
- * 統一し、影は使わず区切りは border 1px のみとした（要求Bに準拠）。
- * 1.24 で DispatchCard.tsx を再設計する際、このブロックごと置き換える想定。
- * 参考: DispatchCard.tsx が使う `.dispatch-card__summary` は移植元にルールが
- * 存在しない孤児クラスだったため、ここでも追加していない（1.24 で拾う）。
+ * サイクル1.25 要求A: react-markdown の描画結果を包む `.md` のタイポグラフィ。
+ * 本文 15px（body の基準と同じ）、code は monospace + surface 背景 + 6px 角丸、
+ * table は 1px border。生 HTML は react-markdown 側で描画しない（プラグイン未追加）。
  */
 @layer components {
-  .dispatch-card {
-    align-self: stretch;
+  .md {
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  .md :where(p, ul, ol, blockquote, table, pre) {
+    margin: 0 0 0.6em 0;
+  }
+
+  .md > :last-child {
+    margin-bottom: 0;
+  }
+
+  .md :where(ul, ol) {
+    padding-left: 1.4em;
+  }
+
+  .md a {
+    color: var(--color-accent);
+    text-decoration: underline;
+  }
+
+  .md code {
+    font-family: var(--font-mono);
+    background: var(--color-surface);
+    border-radius: var(--radius-sm);
+    padding: 0.1em 0.4em;
+    font-size: 0.9em;
+  }
+
+  .md pre {
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    padding: 12px;
-  }
-
-  .dispatch-card__header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.85em;
-  }
-
-  .dispatch-card__project {
-    font-weight: 600;
-  }
-
-  .dispatch-card__meta {
-    color: var(--color-muted);
-  }
-
-  .dispatch-card__reason {
-    margin-top: 4px;
-    color: var(--color-danger);
-    font-size: 0.85em;
-  }
-
-  .dispatch-card__body {
-    margin-top: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .dispatch-card__body textarea {
-    width: 100%;
-    font-family: inherit;
-    border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
-    background: var(--color-bg);
-    color: var(--color-text);
-    padding: 6px 8px;
-  }
-
-  .dispatch-card__target {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.85em;
-  }
-
-  .dispatch-card__approve-note {
-    margin-top: 4px;
-    font-size: 0.85em;
-    color: var(--color-muted);
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .dispatch-card__plan pre {
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
     padding: 8px;
     overflow-x: auto;
-    white-space: pre-wrap;
-    border-radius: var(--radius-sm);
-    font-family: var(--font-mono);
   }
 
-  .dispatch-card__plan-noise {
-    background: var(--color-bg);
-    color: var(--color-muted);
-  }
-
-  .dispatch-card__error {
-    color: var(--color-danger);
-  }
-
-  .dispatch-card__done {
-    margin-top: 8px;
-    font-size: 0.85em;
-  }
-
-  .dispatch-card__done dt {
-    font-weight: 600;
-  }
-
-  .dispatch-card__done dd {
-    margin: 0 0 6px 0;
-    word-break: break-all;
-  }
-
-  .dispatch-card__cancel {
-    margin-top: 8px;
+  .md pre code {
     background: transparent;
-    border: 1px solid var(--color-danger);
-    color: var(--color-danger);
-    border-radius: var(--radius-sm);
-    padding: 4px 10px;
-    cursor: pointer;
+    padding: 0;
   }
 
-  .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 0.8em;
-    color: #fff;
+  .md table {
+    border-collapse: collapse;
+    width: 100%;
   }
 
-  .badge--wait {
-    background: var(--color-muted);
+  .md th,
+  .md td {
+    border: 1px solid var(--color-border);
+    padding: 4px 8px;
+    text-align: left;
   }
 
-  .badge--run {
-    background: var(--color-info);
-  }
-
-  .badge--ok {
-    background: var(--color-success);
-  }
-
-  .badge--ng {
-    background: var(--color-danger);
-  }
-
-  .badge--unknown {
-    background: var(--color-muted);
-  }
-
-  .badge--council {
-    background: var(--color-council);
+  .md blockquote {
+    border-left: 3px solid var(--color-border);
+    padding-left: 0.8em;
+    color: var(--color-muted);
   }
 }
