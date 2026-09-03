@@ -29,36 +29,46 @@ export function ProjectPicker({ projects, selectedIds, onChange }: ProjectPicker
   }
 
   return (
-    <div className="project-picker">
-      <div className="project-picker__title">
+    <div className="mb-2">
+      <div className="text-xs text-muted mb-1.5">
         プロジェクト選択（送信時のヒントになります・未選択でも送信可）
-        <span className="project-picker__note">
+        <span className="block text-muted/80">
           ※ ここでの選択は orchestrator LLM への選択ヒントです。実際の投げ先は承認カードで確定します。
         </span>
       </div>
       <input
         type="text"
-        className="project-picker__search"
+        className="block w-full max-w-xs mb-2 rounded-sm border border-border bg-bg px-2 py-1 text-xs text-text placeholder:text-muted focus:outline-none focus:border-accent"
         placeholder="name / path / machine で絞り込み"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
-      <div className="project-picker__list">
-        {projects.length === 0 && <span className="project-picker__empty">core に接続されたプロジェクトがありません</span>}
+      <div className="flex flex-wrap gap-1.5">
+        {projects.length === 0 && <span className="text-muted text-xs">core に接続されたプロジェクトがありません</span>}
         {projects.length > 0 && visibleProjects.length === 0 && (
-          <span className="project-picker__empty">条件に一致するプロジェクトがありません</span>
+          <span className="text-muted text-xs">条件に一致するプロジェクトがありません</span>
         )}
-        {visibleProjects.map((project) => (
-          <label key={project.id} className="project-picker__item">
-            <input
-              type="checkbox"
-              checked={selectedIds.includes(project.id)}
-              onChange={() => toggle(project.id)}
-            />
-            {project.name}
-            {!project.online && <span className="project-picker__offline">（オフライン）</span>}
-          </label>
-        ))}
+        {visibleProjects.map((project) => {
+          const selected = selectedIds.includes(project.id);
+          return (
+            <label
+              key={project.id}
+              className={
+                'inline-flex items-center gap-1 rounded-sm border px-2 py-1 text-xs cursor-pointer ' +
+                (selected ? 'bg-accent/10 border-accent text-text' : 'border-border text-muted hover:text-text')
+              }
+            >
+              <input
+                type="checkbox"
+                className="accent-[var(--color-accent)]"
+                checked={selected}
+                onChange={() => toggle(project.id)}
+              />
+              {project.name}
+              {!project.online && <span className="text-danger">（オフライン）</span>}
+            </label>
+          );
+        })}
       </div>
     </div>
   );

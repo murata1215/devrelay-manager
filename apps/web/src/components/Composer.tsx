@@ -37,16 +37,21 @@ export function Composer({ disabled, onSend }: ComposerProps) {
   const isBusy = sending || disabled;
 
   return (
-    <div className="composer">
+    <div className="rounded-lg border border-border bg-surface p-3 flex flex-col gap-2">
       <textarea
+        className="w-full resize-y border-0 bg-transparent text-text placeholder:text-muted focus:outline-none"
         value={content}
         placeholder="指示を入力してください"
         onChange={(e) => setContent(e.target.value)}
         disabled={isBusy}
         rows={3}
       />
-      <div className="composer__actions">
-        <label className="composer__council" title="claude↔codex の協議を有効化（既定 OFF）">
+      <div className="flex items-center gap-3">
+        {/* サイクル1.21で結線した council トグルは維持する。視覚的に控えめに配置するのみ（1.23）。 */}
+        <label
+          className="flex items-center gap-1 text-xs text-muted ml-auto"
+          title="claude↔codex の協議を有効化（既定 OFF）"
+        >
           <input
             type="checkbox"
             checked={council}
@@ -55,7 +60,12 @@ export function Composer({ disabled, onSend }: ComposerProps) {
           />
           council
         </label>
-        <button type="button" onClick={() => void handleSend()} disabled={isBusy || content.trim().length === 0}>
+        <button
+          type="button"
+          className="rounded-sm bg-accent text-white text-sm font-medium px-4 py-1.5 disabled:opacity-50"
+          onClick={() => void handleSend()}
+          disabled={isBusy || content.trim().length === 0}
+        >
           送信
         </button>
       </div>

@@ -30,18 +30,26 @@ export function Timeline({
   const items = buildTimeline(messages, dispatches);
 
   if (items.length === 0) {
-    return <div className="timeline timeline--empty">まだメッセージがありません。下の入力欄から指示を送ってください。</div>;
+    return <div className="text-muted text-center py-16">まだメッセージがありません。下の入力欄から指示を送ってください。</div>;
   }
 
   return (
-    <div className="timeline">
+    <div className="flex flex-col gap-4">
       {items.map((item) => {
         if (item.kind === 'message') {
           const role = item.message.role;
+          if (role === 'user') {
+            return (
+              <div key={item.id} className="self-end max-w-[80%] rounded-lg bg-accent/10 px-3 py-2">
+                <div className="text-xs text-muted mb-1">あなた</div>
+                <div className="whitespace-pre-wrap break-words">{item.message.content}</div>
+              </div>
+            );
+          }
           return (
-            <div key={item.id} className={`bubble bubble--${role}`}>
-              <div className="bubble__role">{role === 'user' ? 'あなた' : 'manager'}</div>
-              <div className="bubble__content">{item.message.content}</div>
+            <div key={item.id} className="self-start max-w-[80%]">
+              <div className="text-xs text-muted mb-1">manager</div>
+              <div className="whitespace-pre-wrap break-words">{item.message.content}</div>
             </div>
           );
         }
