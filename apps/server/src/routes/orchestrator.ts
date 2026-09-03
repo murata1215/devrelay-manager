@@ -25,10 +25,11 @@ import { orchestrate } from '../orchestrator/orchestrator-llm.js';
 import type { OrchestrateDeps } from '../orchestrator/orchestrator-llm.js';
 import { prismaDraftSink } from '../orchestrator/draft-sink.js';
 import type { DraftCreateClient } from '../orchestrator/draft-sink.js';
-import { readManagerSettingsFile } from '../orchestrator/manager-settings.js';
+import { readManagerSettingsFile, resolveModel } from '../orchestrator/manager-settings.js';
 import type { ManagerSettings } from '../orchestrator/manager-settings.js';
-import { parseTier, parseIntent } from '../orchestrator/tier.js';
+import { parseTier, parseIntent, resolveTier } from '../orchestrator/tier.js';
 import type { Tier, Intent } from '../orchestrator/tier.js';
+import { managerReplyContent } from '../orchestrator/conversation-reply.js';
 import {
   anthropicClientFromEnv,
   createAnthropicLlm,
@@ -144,6 +145,27 @@ export async function orchestratorRoutes(app: FastifyInstance) {
           preferredProjectIds: parsed.data.projectIds,
           council: parsed.data.council,
         });
+
+        // サイクル1.24: spec §9 の会話枝は Dispatch を作らないため、返答を Message として
+        // 残す（これが無いと web は reload() で何も拾えず、レスポンス body の内容は
+        // リロードで消える）。invalid 枝も同様に無言 200 を解消する。proposal 枝は
+        // Dispatch カードが表示されるため null（managerReplyContent 側で判定済み）。
+        // tier/model は OrchestrateResult に含まれないため、orchestrate() 内部（L175相当）
+        // と同一の入力（intent/tierOverride/settings）でルート側が再計算する。
+        const replyContent = managerReplyContent(result);
+        if (replyContent !== null) {
+          const replyTier = resolveTier(intent, tierOverride);
+          await prisma.message.create({
+            data: {
+              threadId: request.params.threadId,
+              role: 'manager',
+              content: replyContent,
+              tier: replyTier,
+              model: resolveModel(replyTier, settings),
+            },
+          });
+        }
+
         return reply.status(200).send({ messageId: message.id, result });
       } catch (err) {
         const detail = describeAnthropicError(err);
