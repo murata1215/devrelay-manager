@@ -1,5 +1,5 @@
 /**
- * タイムライン上に表示する Dispatch カード（サイクル1.25 要求B: 全面再設計）。
+ * タイムライン上に表示する Dispatch カード（サイクル1.25 要求B: 全面再設計 / 1.26 要求1・2・4: 仕上げ）。
  *
  * 状態 → カード種別の写像は lib/dispatch-status.ts の cardKindFor に集約している
  * （変更禁止）。バッジの色は同ファイルの statusToneOf が返す5トーン（wait/run/ok/ng/unknown）を、
@@ -9,9 +9,13 @@
  * 回り続ける。そのためスピナーは tone==='run'、danger 帯（statusReason）は tone==='ng' で
  * 出し分ける。
  *
- * 承認・中止系のボタンはすべて、window.confirm ではなく本コンポーネント内 state（confirm）
+ * 承認・中止・再取得はすべて、window.confirm ではなく本コンポーネント内 state（confirm）
  * によるインライン確認を1枚挟み、busy 中は disabled にして二重送信を防ぐ
  * （呼び出し元 App.tsx が busy 管理する）。
+ * サイクル1.26: kind ごとの主操作（primaryAction）とその確認を「フッタ1行」に統合する。
+ * 確認中はこの行そのものが確認バーに置き換わる（primary ボタンの下に別枠で足さない）。
+ * 行内は「中止（左端）……… 主操作（右寄せ）」の並び。api.* の呼び出し引数・
+ * runAction（onBusyChange→action→onChanged の順序）は1.25から変更しない。
  */
 import { Fragment, useEffect, useState } from 'react';
 import type { CoreProjectDto, DispatchDto, DispatchPlanDto } from '../types.js';
@@ -75,9 +79,50 @@ function resolveProjectName(projectId: string, projects: CoreProjectDto[]): stri
   return projects.find((p) => p.id === projectId)?.name ?? projectId;
 }
 
+/**
+ * ヘッダの tier/model を「orchestrator（manager の頭脳）」の軸として1本にまとめる（1.26 要求4）。
+ * 完了カードの responseModel（core 側 executor）と並んだときに軸の違いが分かるようにする。
+ * 片方が無ければ存在する方だけ、両方無ければ null（span 自体を出さない）。
+ */
+function orchestratorLabelOf(tier: string | null, model: string | null): string | null {
+  if (tier && model) return `orchestrator: ${tier} · ${model}`;
+  if (tier) return `orchestrator: ${tier}`;
+  if (model) return `orchestrator: ${model}`;
+  return null;
+}
+
+/**
+ * done カードの行ラベル日本語化テーブル（1.26 要求4）。
+ * lib/dispatch-status.ts の doneRowsOf は変更禁止のため、表示直前にここで写像する。
+ * 値・順序・null 除外ロジックは doneRowsOf 側のまま不変。
+ */
+const DONE_ROW_LABEL_JA: Record<string, string> = {
+  submissionId: '提出ID',
+  buildId: 'ビルドID',
+  devlogPath: 'devlog',
+  inputTokens: '入力トークン',
+  outputTokens: '出力トークン',
+  responseModel: '実行モデル（executor）',
+};
+
+function doneRowLabelJa(label: string): string {
+  return DONE_ROW_LABEL_JA[label] ?? label;
+}
+
 /** window.confirm の代替として保持する、実行待ちの確認1件。 */
 interface PendingConfirm {
   message: string;
+  confirmLabel: string;
+  run: () => Promise<void>;
+}
+
+/** kind ごとの主操作（フッタ右側に1つだけ出す）。 */
+interface PrimaryAction {
+  label: string;
+  style: string;
+  disabled: boolean;
+  confirmMessage: string;
+  confirmLabel: string;
   run: () => Promise<void>;
 }
 
@@ -89,6 +134,7 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
   const projectName = resolveProjectName(dispatch.projectId, projects);
   const approveNote = approveNoteOf(dispatch);
   const councilBadge = councilBadgeOf(dispatch);
+  const orchestratorLabel = orchestratorLabelOf(dispatch.tier, dispatch.model);
 
   const [instruction, setInstruction] = useState(dispatch.instruction ?? '');
   const [targetProjectId, setTargetProjectId] = useState(dispatch.projectId);
@@ -131,7 +177,7 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
     // eslint disable 相当のコメント: 依存簡略化の意図的な選択（過剰な再取得を避ける）。
   }, [dispatch.id, expanded]);
 
-  /** 承認・中止系の共通実行部。確認済みの action を busy 化して実行し、再取得する。 */
+  /** 承認・中止系の共通実行部。確認済みの action を busy 化して実行し、再取得する（1.25から不変）。 */
   async function runAction(action: () => Promise<void>) {
     onBusyChange(true);
     try {
@@ -145,9 +191,9 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
   }
 
   /** window.confirm の代替: インライン確認を1件だけ保持する。 */
-  function requestConfirm(message: string, action: () => Promise<void>) {
+  function requestConfirm(message: string, confirmLabel: string, action: () => Promise<void>) {
     if (busy) return;
-    setConfirm({ message, run: action });
+    setConfirm({ message, confirmLabel, run: action });
   }
 
   function confirmYes() {
@@ -160,6 +206,48 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
   function confirmNo() {
     setConfirm(null);
   }
+
+  // kind ごとの主操作を1つに集約する。api.* の引数は1.25から変更しない。
+  let primaryAction: PrimaryAction | null = null;
+  if (kind === 'draft') {
+    primaryAction = {
+      label: '投げ先を承認（ゲート①）',
+      style: BTN_PRIMARY,
+      disabled: instruction.trim().length === 0,
+      confirmMessage: '承認しますか？（ゲート①）',
+      confirmLabel: '承認する',
+      run: async () => {
+        const nextProjectId = targetProjectId !== dispatch.projectId ? targetProjectId : undefined;
+        await api.approveTarget(dispatch.id, instruction.trim(), nextProjectId);
+      },
+    };
+  } else if (kind === 'plan') {
+    primaryAction = {
+      label: 'プランを承認して実行（ゲート②）',
+      style: BTN_PRIMARY,
+      disabled: false,
+      confirmMessage: '承認しますか？（ゲート②）',
+      confirmLabel: '承認する',
+      run: async () => {
+        const result = await api.approvePlan(dispatch.id, approveNoteInput);
+        onInfo(`承認結果: ${result.outcome}${result.detail ? ` (${result.detail})` : ''}`);
+      },
+    };
+  } else if (kind === 'stale') {
+    primaryAction = {
+      label: '再取得',
+      style: BTN_SECONDARY,
+      disabled: false,
+      confirmMessage: '再取得しますか？',
+      confirmLabel: '再取得する',
+      run: async () => {
+        const result = await api.retryStale(dispatch.id);
+        onInfo(`再取得結果: ${result.outcome}`);
+      },
+    };
+  }
+
+  const showFooter = primaryAction !== null || canCancel(dispatch.status);
 
   return (
     <div className="rounded-lg border border-border bg-surface p-3">
@@ -179,8 +267,7 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
           </span>
         )}
         <span className="font-semibold text-text">{projectName}</span>
-        {dispatch.tier && <span className="text-xs text-muted">tier: {dispatch.tier}</span>}
-        {dispatch.model && <span className="text-xs text-muted">model: {dispatch.model}</span>}
+        {orchestratorLabel && <span className="text-xs text-muted">{orchestratorLabel}</span>}
         <span className="ml-auto shrink-0 text-xs text-muted">
           {new Date(dispatch.statusChangedAt).toLocaleString('ja-JP')}
         </span>
@@ -225,21 +312,6 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
                 <option value={dispatch.projectId}>{projectName}</option>
               )}
             </select>
-          </div>
-          <div>
-            <button
-              type="button"
-              className={BTN_PRIMARY}
-              disabled={busy || instruction.trim().length === 0}
-              onClick={() =>
-                requestConfirm('投げ先を承認しますか？（ゲート①）', async () => {
-                  const nextProjectId = targetProjectId !== dispatch.projectId ? targetProjectId : undefined;
-                  await api.approveTarget(dispatch.id, instruction.trim(), nextProjectId);
-                })
-              }
-            >
-              投げ先を承認（ゲート①）
-            </button>
           </div>
         </div>
       )}
@@ -293,39 +365,6 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
             rows={2}
             placeholder="任意: 案B採用など、承認時に agent へ伝える追記"
           />
-          <div>
-            <button
-              type="button"
-              className={BTN_PRIMARY}
-              disabled={busy}
-              onClick={() =>
-                requestConfirm('プランを承認して実行しますか？（ゲート②）', async () => {
-                  const result = await api.approvePlan(dispatch.id, approveNoteInput);
-                  onInfo(`承認結果: ${result.outcome}${result.detail ? ` (${result.detail})` : ''}`);
-                })
-              }
-            >
-              プランを承認して実行（ゲート②）
-            </button>
-          </div>
-        </div>
-      )}
-
-      {kind === 'stale' && (
-        <div className="mt-2">
-          <button
-            type="button"
-            className={BTN_SECONDARY}
-            disabled={busy}
-            onClick={() =>
-              requestConfirm('プランを再取得しますか？', async () => {
-                const result = await api.retryStale(dispatch.id);
-                onInfo(`再取得結果: ${result.outcome}`);
-              })
-            }
-          >
-            再取得
-          </button>
         </div>
       )}
 
@@ -335,39 +374,55 @@ export function DispatchCard({ dispatch, projects, busy, onBusyChange, onChanged
         <dl className="mt-2 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-sm">
           {doneRowsOf(dispatch).map((row) => (
             <Fragment key={row.label}>
-              <dt className="font-semibold text-muted">{row.label}</dt>
+              <dt className="font-semibold text-muted">{doneRowLabelJa(row.label)}</dt>
               <dd className="m-0 break-all">{row.value}</dd>
             </Fragment>
           ))}
         </dl>
       )}
 
-      {canCancel(dispatch.status) && (
-        <div className="mt-2">
-          <button
-            type="button"
-            className={BTN_TEXT_DANGER}
-            disabled={busy}
-            onClick={() =>
-              requestConfirm('この Dispatch を中止しますか？', async () => {
-                await api.cancelDispatch(dispatch.id, 'web UI から中止');
-              })
-            }
-          >
-            中止
-          </button>
-        </div>
-      )}
-
-      {confirm && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-sm border border-border bg-bg p-2 text-sm">
-          <span className="flex-1">{confirm.message}</span>
-          <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={confirmYes}>
-            実行
-          </button>
-          <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={confirmNo}>
-            戻す
-          </button>
+      {showFooter && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {confirm ? (
+            <>
+              <span className="flex-1 text-sm">{confirm.message}</span>
+              <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={confirmYes}>
+                {confirm.confirmLabel}
+              </button>
+              <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={confirmNo}>
+                戻す
+              </button>
+            </>
+          ) : (
+            <>
+              {canCancel(dispatch.status) && (
+                <button
+                  type="button"
+                  className={BTN_TEXT_DANGER}
+                  disabled={busy}
+                  onClick={() =>
+                    requestConfirm('中止しますか？', '中止する', async () => {
+                      await api.cancelDispatch(dispatch.id, 'web UI から中止');
+                    })
+                  }
+                >
+                  中止
+                </button>
+              )}
+              {primaryAction && (
+                <button
+                  type="button"
+                  className={`ml-auto ${primaryAction.style}`}
+                  disabled={busy || primaryAction.disabled}
+                  onClick={() =>
+                    requestConfirm(primaryAction!.confirmMessage, primaryAction!.confirmLabel, primaryAction!.run)
+                  }
+                >
+                  {primaryAction.label}
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

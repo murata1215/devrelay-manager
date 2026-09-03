@@ -49,7 +49,7 @@ export function ProjectPicker({ projects, selectedIds, onChange }: ProjectPicker
       <div className="flex flex-wrap items-center gap-1.5">
         <input
           type="text"
-          className="w-40 shrink-0 rounded-sm border border-border bg-bg px-2 py-1 text-xs text-text placeholder:text-muted focus:border-accent focus:outline-none"
+          className="min-w-64 flex-1 rounded-sm border border-border bg-bg px-2 py-1 text-xs text-text placeholder:text-muted focus:border-accent focus:outline-none"
           placeholder="投げ先のヒント（未選択でも送信可）"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -73,7 +73,7 @@ export function ProjectPicker({ projects, selectedIds, onChange }: ProjectPicker
         ))}
         <button
           type="button"
-          className="rounded-sm border border-border px-2 py-1 text-xs text-muted hover:text-text"
+          className="ml-auto shrink-0 rounded-sm border border-border px-2 py-1 text-xs text-muted hover:text-text"
           onClick={() => setOpen((v) => !v)}
         >
           {open ? '候補を隠す' : '候補を表示'}
