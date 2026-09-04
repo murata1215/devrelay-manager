@@ -15,9 +15,14 @@ import type {
 } from './types.js';
 import { buildApprovePlanBody } from './lib/approve-plan-body.js';
 import { buildOrchestrateBody } from './lib/orchestrate-body.js';
+import { readToken, clearToken } from './auth.js';
 
-/** API ベース URL。既定は manager サーバーのローカル既定ポート 3100。 */
-const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:3100';
+/**
+ * API ベース URL。既定は空文字（同一オリジン配信、サイクル1.27）。
+ * ローカル開発（apps/web を別ポートの vite dev server で動かす場合）は
+ * apps/web/.env.development の VITE_API_BASE=http://127.0.0.1:3100 が使われる。
+ */
+const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 
 /**
  * 認証未実装（層⑤で対応予定）のため、スレッド作成者を表す固定値。
@@ -49,13 +54,18 @@ function extractErrorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-/** 共通 fetch。非 2xx は ApiError を throw する。 */
+/** 共通 fetch。非 2xx は ApiError を throw する。401/403 はトークンを消してサインイン画面へ戻す。 */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = readToken();
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
       ...init,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers ?? {}),
+      },
     });
   } catch (err) {
     // ネットワークエラー（サーバー未起動等）。コンソールに握り潰さず呼び出し側へ伝える。
@@ -74,6 +84,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      clearToken(res.status === 403 ? 'forbidden' : 'unauthorized');
+    }
     throw new ApiError(res.status, extractErrorMessage(body, `HTTP ${res.status}`));
   }
   return body as T;

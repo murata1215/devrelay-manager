@@ -1,6 +1,10 @@
 import 'dotenv/config';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import { healthRoutes } from './routes/health.js';
 import { threadRoutes } from './routes/thread.js';
 import { messageRoutes } from './routes/message.js';
@@ -12,6 +16,18 @@ import type { DispatchQueryClient } from './orchestrator/dispatch-store.js';
 import { readManagerSettingsFile } from './orchestrator/manager-settings.js';
 import { prisma } from './db/client.js';
 import * as coreClient from './core/coreClient.js';
+import { requiresAuth } from './auth/route-guard.js';
+import { extractBearerToken, createTokenVerifier } from './auth/verify-token.js';
+import { createTokenCache } from './auth/cache.js';
+import { parseAllowedUserIds, isUserAllowed } from './auth/allow-list.js';
+
+// request.userId は認証成功時にのみセットする（層⑤、サイクル1.27）。
+// 本サイクルではユーザー単位のデータ分離はしない（置くだけで既存ルートは参照しない）。
+declare module 'fastify' {
+  interface FastifyRequest {
+    userId?: string;
+  }
+}
 
 const app = Fastify({ logger: true });
 
@@ -44,18 +60,93 @@ try {
   process.exit(1);
 }
 
-await app.register(cors);
+// CORS: 空なら @fastify/cors 自体を登録しない（同一オリジン配信が既定の本番構成）。
+// 開発時は CORS_ORIGINS=http://localhost:5173 のように指定する。
+const corsOrigins = (process.env.CORS_ORIGINS ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter((s) => s.length > 0);
+if (corsOrigins.length > 0) {
+  await app.register(cors, { origin: corsOrigins, credentials: false });
+  app.log.info(`CORS_ORIGINS=${corsOrigins.join(',')}`);
+} else {
+  app.log.warn('CORS_ORIGINS が空のため @fastify/cors は登録しません（同一オリジン配信を想定）。');
+}
+
+// 認証（層⑤、サイクル1.27）: core の AuthSession に相乗りする。
+// Authorization: Bearer <token> を core の GET /api/auth/me に転送し、得られた userId が
+// MANAGER_ALLOWED_USER_IDS に含まれているかで許可判定する。未設定（空）は fail-closed（全拒否）。
+const authMode = process.env.MANAGER_AUTH_MODE ?? 'on';
+if (authMode !== 'on' && authMode !== 'off') {
+  app.log.error(`MANAGER_AUTH_MODE には on/off 以外の値は指定できません: ${authMode}`);
+  process.exit(1);
+}
+if (authMode === 'off') {
+  app.log.warn(
+    'MANAGER_AUTH_MODE=off: 認証は無効です（ローカル開発専用。本番のインターネット公開では絶対に使わないこと）。'
+  );
+}
+const allowedUserIds = parseAllowedUserIds(process.env.MANAGER_ALLOWED_USER_IDS);
+app.log.info(`manager allowed users: ${allowedUserIds.length}`);
+if (allowedUserIds.length === 0) {
+  app.log.warn('MANAGER_ALLOWED_USER_IDS が空です。認証が有効な間、全ユーザーが 403 になります。');
+}
+const coreBaseUrl = process.env.CORE_BASE_URL ?? 'https://app.devrelay.io';
+const verifyToken = createTokenVerifier({
+  coreBaseUrl,
+  cache: createTokenCache(60_000),
+  fetchImpl: fetch,
+  now: () => Date.now(),
+});
+
+app.addHook('onRequest', async (request, reply) => {
+  const pathname = new URL(request.url, 'http://localhost').pathname;
+  if (!requiresAuth(request.method, pathname)) {
+    return;
+  }
+  if (authMode === 'off') {
+    return;
+  }
+  const token = extractBearerToken(request.headers.authorization);
+  if (!token) {
+    return reply.status(401).send({ error: 'unauthorized' });
+  }
+  const result = await verifyToken(token);
+  if (!result.ok) {
+    if (result.code === 'upstream_unavailable') {
+      return reply.status(503).send({ error: 'auth_upstream_unavailable' });
+    }
+    return reply.status(401).send({ error: 'unauthorized' });
+  }
+  if (!isUserAllowed(allowedUserIds, result.userId)) {
+    return reply.status(403).send({ error: 'forbidden' });
+  }
+  request.userId = result.userId;
+});
 
 await app.register(healthRoutes);
 await app.register(threadRoutes);
 await app.register(messageRoutes);
 await app.register(coreRoutes);
 
-// dispatch ルート（承認ゲート・手動 tick）は manager 側認証が未実装（層⑤）のため、
-// worker を使わない既定の 'off' では登録しない（HOST は 0.0.0.0 既定で常時公開されうる）。
+// dispatch ルート（承認ゲート・手動 tick）。認証層は上の onRequest フックで全ルート共通に
+// 掛かっている。worker を使わない既定の 'off' では引き続き登録しない
+// （そもそも worker が動かず意味の無いルート群のため）。
 if (workerMode !== 'off') {
   await app.register(dispatchRoutes);
   await app.register(orchestratorRoutes);
+}
+
+// 静的配信（apps/web/dist）: ビルド成果物が無ければ警告してスキップする。
+// SPA は #thread=/#token= のハッシュルーティングのみを使うため、フォールバック配信は不要。
+// find-my-way は完全一致の API ルートをワイルドカードより優先して解決するため、
+// 登録順に関わらず /threads 等の API パスとは衝突しない。
+const webDistDir = fileURLToPath(new URL('../../web/dist', import.meta.url));
+if (existsSync(join(webDistDir, 'index.html'))) {
+  await app.register(fastifyStatic, { root: webDistDir, prefix: '/' });
+  app.log.info(`web dist を静的配信します: ${webDistDir}`);
+} else {
+  app.log.warn(`web dist が見つかりません（${webDistDir}）。静的配信をスキップします。`);
 }
 
 if (workerMode === 'resident') {
@@ -74,6 +165,8 @@ if (workerMode === 'resident') {
   });
 }
 
+// 既定 3100 はローカル開発用。本番は 9026（Caddy の TestFlight 自動生成設定が
+// manager.devrelay.io からこのポートへ upstream する。Caddy 側は本サイクルで触らない）。
 const port = Number(process.env.PORT ?? 3100);
 const host = process.env.HOST ?? '0.0.0.0';
 

@@ -14,8 +14,11 @@ import { ThreadList } from './components/ThreadList.js';
 import { Timeline } from './components/Timeline.js';
 import { Composer } from './components/Composer.js';
 import { ProjectPicker } from './components/ProjectPicker.js';
+import { SignIn } from './components/SignIn.js';
+import { readToken, readAuthError, clearToken, onAuthCleared } from './auth.js';
 
 const POLL_INTERVAL_MS = 4000;
+const CORE_WEB_URL = (import.meta.env.VITE_CORE_WEB_URL as string | undefined) ?? 'https://app.devrelay.io';
 
 export function App() {
   const [threads, setThreads] = useState<ThreadDto[]>([]);
@@ -30,6 +33,9 @@ export function App() {
   const [sendDisabled, setSendDisabled] = useState(false);
   // サイクル1.23: 768px 未満でサイドバーを開閉するための state（レイアウト再構成のみ、他ロジックには影響しない）。
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // サイクル1.27: 認証。トークンが無ければ後段で SignIn を返す（hooks は全て先に宣言済みにする）。
+  const [authToken, setAuthToken] = useState<string | null>(() => readToken());
+  useEffect(() => onAuthCleared(() => setAuthToken(null)), []);
 
   /** fetch 失敗を画面上部の1行エラーへ反映する（コンソールに握り潰さない）。 */
   const reportError = useCallback((err: unknown) => {
@@ -158,6 +164,25 @@ export function App() {
 
   const selectedThread = threads.find((t) => t.id === selectedThreadId) ?? null;
 
+  // 認証分岐: ここまでの hooks 宣言が終わった後にのみ early return する。
+  if (!authToken) {
+    return <SignIn reason={readAuthError()} />;
+  }
+
+  /** core にログアウトを伝え（失敗しても続行）、ローカルのトークンを消す。 */
+  async function handleLogout() {
+    try {
+      await fetch(`${CORE_WEB_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+    } catch {
+      // core に届かなくても manager 側はログアウトを続行する。
+    }
+    clearToken(null);
+    setAuthToken(null);
+  }
+
   return (
     <div className="flex flex-col h-dvh bg-bg text-text font-sans">
       <header className="flex items-center gap-3 h-11 px-4 border-b border-border bg-surface shrink-0">
@@ -178,6 +203,13 @@ export function App() {
         >
           app に切替
         </a>
+        <button
+          type="button"
+          className="shrink-0 rounded-sm border border-border px-2 py-1 text-xs text-muted hover:text-text"
+          onClick={() => void handleLogout()}
+        >
+          ログアウト
+        </button>
       </header>
 
       {errorMessage && (
