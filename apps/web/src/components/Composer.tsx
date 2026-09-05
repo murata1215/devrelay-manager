@@ -17,6 +17,19 @@
  * サイクル1.29: 送信の成否判定とクリア/保持の遷移は `lib/composer-send.ts` の
  * `performSend` に切り出した（DOM 無しのテストランナーからこの判断ロジックだけを
  * テストするため）。ここでは戻り値をそのまま setState するだけにする。
+ *
+ * サイクル1.35: チャット入力への画像添付（フェーズ2）。
+ * - クリップボード貼り付け（スクリーンショット等）・ドラッグ＆ドロップ・ファイル選択の
+ *   いずれでも画像4形式（png/jpeg/gif/webp）を添付できる。
+ * - 拡張子・宣言 MIME は信用せず、必ず detectImageMimeType で実バイトから判定する
+ *   （addFiles はファイル内容を読んでから判定するため、拡張子偽装ファイルでも
+ *   正しい形式で扱われる。テキストとしても画像としても認識できないファイルは拒否する）。
+ * - 貼り付けられた画像は `pasted-image.png` のように、フェーズ1のテキスト貼り付け
+ *   （`pasted-text.txt`）と同じ `uniqueFilename` 採番規則（-2, -3, …）を使う
+ *   （拡張子は検出された実形式に従う）。
+ * - 画像本体は orchestrator LLM には渡さない（server 側 `attachment.ts` の二重防壁を参照）。
+ *   ここではその防壁の対象となる `Attachment.kind`/`base64` を正しく組み立てるだけで、
+ *   本コンポーネントは画像内容を一切解釈・表示加工しない。
  */
 import { useRef, useState } from 'react';
 import type { DragEvent } from 'react';
@@ -25,8 +38,12 @@ import {
   shouldAttachPaste,
   uniqueFilename,
   mimeTypeForFilename,
+  detectImageMimeType,
+  imageExtensionForMimeType,
+  bytesToBase64,
   validateAttachments,
   type Attachment,
+  type AllowedImageMimeType,
   type WireAttachment,
 } from '../lib/attachment.js';
 import { performSend } from '../lib/composer-send.js';
@@ -38,6 +55,11 @@ interface ComposerProps {
   disabled: boolean;
   onSend: (content: string, council: boolean, attachments: WireAttachment[]) => Promise<void>;
 }
+
+/** サイクル1.35: tryAddAttachments へ渡す候補の判別ユニオン（text/image）。 */
+type AttachmentCandidate =
+  | { kind: 'text'; filename: string; mimeType: 'text/plain' | 'text/markdown'; text: string }
+  | { kind: 'image'; filename: string; mimeType: AllowedImageMimeType; base64: string; byteSize: number };
 
 let idCounter = 0;
 function nextId(): string {
@@ -57,18 +79,33 @@ export function Composer({ disabled, onSend }: ComposerProps) {
   const isBusy = sending || disabled;
 
   /** 新規添付候補を既存一覧へ追加する。件数/サイズ/UTF-8 検証に失敗したら追加せずエラー表示する。 */
-  function tryAddAttachments(candidates: Array<{ filename: string; mimeType: 'text/plain' | 'text/markdown'; text: string }>) {
+  function tryAddAttachments(candidates: AttachmentCandidate[]) {
     const existingNames = attachments.map((a) => a.filename);
     const added: Attachment[] = [];
     for (const candidate of candidates) {
       const filename = uniqueFilename(candidate.filename, [...existingNames, ...added.map((a) => a.filename)]);
-      added.push({
-        id: nextId(),
-        filename,
-        mimeType: candidate.mimeType,
-        text: candidate.text,
-        byteSize: new TextEncoder().encode(candidate.text).length,
-      });
+      if (candidate.kind === 'image') {
+        // サイクル1.35: 画像は text を常に空文字にする（二重防壁の2枚目。attachment.ts 冒頭コメント参照）。
+        added.push({
+          id: nextId(),
+          filename,
+          mimeType: candidate.mimeType,
+          kind: 'image',
+          text: '',
+          base64: candidate.base64,
+          byteSize: candidate.byteSize,
+        });
+      } else {
+        added.push({
+          id: nextId(),
+          filename,
+          mimeType: candidate.mimeType,
+          kind: 'text',
+          text: candidate.text,
+          base64: '',
+          byteSize: new TextEncoder().encode(candidate.text).length,
+        });
+      }
     }
     const merged = [...attachments, ...added];
     // サイクル1.29: 追加した時点で本文込みの合計文字数上限も評価する（送信前に気づけるように）。
@@ -85,31 +122,86 @@ export function Composer({ disabled, onSend }: ComposerProps) {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }
 
+  /**
+   * サイクル1.35: ファイル選択・ドラッグ＆ドロップで渡されたファイルを添付候補へ変換する。
+   * 拡張子は信用せず、まず実バイトを読んで画像かどうかを magic byte で判定する
+   * （画像として認識できなければテキスト拡張子として扱う）。1件でも非対応形式があれば
+   * 何も追加せずエラー表示する（1.28 以前と同じ all-or-nothing の挙動を維持）。
+   */
   async function addFiles(files: FileList | File[]) {
     const list = Array.from(files);
     if (list.length === 0) {
       return;
     }
-    const candidates: Array<{ filename: string; mimeType: 'text/plain' | 'text/markdown'; text: string }> = [];
+    const candidates: AttachmentCandidate[] = [];
     for (const file of list) {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const detectedImageMime = detectImageMimeType(bytes);
+      if (detectedImageMime) {
+        candidates.push({
+          kind: 'image',
+          filename: file.name,
+          mimeType: detectedImageMime,
+          base64: bytesToBase64(bytes),
+          byteSize: bytes.length,
+        });
+        continue;
+      }
       const mimeType = mimeTypeForFilename(file.name);
       if (!mimeType) {
-        setError(`"${file.name}" は対応していない拡張子です（.txt / .md / .log のみ）。`);
+        setError(
+          `"${file.name}" は対応していない形式です（.txt / .md / .log、または png/jpeg/gif/webp 画像のみ）。`
+        );
         return;
       }
-      const text = await file.text();
-      candidates.push({ filename: file.name, mimeType, text });
+      // file.text() と同じ UTF-8 デコード（不正バイト列は \uFFFD に置換される）。
+      // 既に読み込んだ bytes を使い回し、画像判定と二重にファイルを読まない。
+      const text = new TextDecoder('utf-8').decode(bytes);
+      candidates.push({ kind: 'text', filename: file.name, mimeType, text });
     }
     tryAddAttachments(candidates);
   }
 
+  /**
+   * サイクル1.35: クリップボードに画像（スクリーンショット等）が含まれる場合は
+   * `pasted-image.png` として添付化する（フェーズ1のテキスト貼り付けと同じ
+   * uniqueFilename 採番規則。拡張子は検出された実形式に従う）。
+   * 画像として認識できないファイルが混ざっていた場合は無視する（テキスト貼り付けの妨げにしない）。
+   */
+  async function addPastedImages(files: File[]) {
+    const candidates: AttachmentCandidate[] = [];
+    for (const file of files) {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const detected = detectImageMimeType(bytes);
+      if (!detected) {
+        continue;
+      }
+      candidates.push({
+        kind: 'image',
+        filename: `pasted-image${imageExtensionForMimeType(detected)}`,
+        mimeType: detected,
+        base64: bytesToBase64(bytes),
+        byteSize: bytes.length,
+      });
+    }
+    if (candidates.length > 0) {
+      tryAddAttachments(candidates);
+    }
+  }
+
   function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const imageFiles = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith('image/'));
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      void addPastedImages(imageFiles);
+      return;
+    }
     const text = e.clipboardData.getData('text/plain');
     if (!shouldAttachPaste(text)) {
       return;
     }
     e.preventDefault();
-    tryAddAttachments([{ filename: 'pasted-text.txt', mimeType: 'text/plain', text }]);
+    tryAddAttachments([{ kind: 'text', filename: 'pasted-text.txt', mimeType: 'text/plain', text }]);
   }
 
   function handleDrop(e: DragEvent<HTMLDivElement>) {
@@ -174,7 +266,7 @@ export function Composer({ disabled, onSend }: ComposerProps) {
       <textarea
         className="w-full resize-y border-0 bg-transparent text-text placeholder:text-muted focus:outline-none"
         value={content}
-        placeholder="指示を入力してください（2000文字を超える貼り付けは自動で添付になります）"
+        placeholder="指示を入力してください（2000文字を超える貼り付け・画像の貼り付けは自動で添付になります）"
         onChange={(e) => setContent(e.target.value)}
         onPaste={handlePaste}
         disabled={isBusy}
@@ -184,7 +276,7 @@ export function Composer({ disabled, onSend }: ComposerProps) {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".txt,.md,.log"
+          accept=".txt,.md,.log,.png,.jpg,.jpeg,.gif,.webp"
           multiple
           className="hidden"
           onChange={handleFileInputChange}
@@ -195,7 +287,7 @@ export function Composer({ disabled, onSend }: ComposerProps) {
           className="rounded-sm border border-border px-2 py-1 text-xs text-muted hover:text-text disabled:opacity-50"
           onClick={() => fileInputRef.current?.click()}
           disabled={isBusy || attachments.length >= MAX_ATTACHMENT_COUNT}
-          title="ファイルを添付（.txt / .md / .log）"
+          title="ファイルを添付（.txt / .md / .log、または png / jpeg / gif / webp 画像）"
         >
           📎 添付
         </button>

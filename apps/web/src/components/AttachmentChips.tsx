@@ -1,17 +1,29 @@
 /**
  * サイクル1.28: チャット入力の添付チップ（テキストのみ、フェーズ1）。
+ * サイクル1.35: 画像添付（フェーズ2）のサムネイル表示を追加。
  *
  * ProjectPicker.tsx のチップ／ポップオーバー流儀をそのまま踏襲する
  * （チップ: rounded-full border-accent bg-accent/10、ポップオーバー: fixed backdrop +
  * absolute bottom-full ...）。プレビューは読み取り専用（編集はフェーズ2以降）。
  * 画面を埋めないよう max-h-60 でスクロールし、表示のみ先頭20,000文字に留める
  * （送信内容・LLM入力・core への content は常に全文。表示上の制限のみ）。
+ *
+ * 画像（kind === 'image'）はチップに16pxの小さなサムネイルを表示し、プレビュー
+ * ポップオーバーでは `<pre>` の代わりに拡大画像を表示する。data URL
+ * （`data:${mimeType};base64,${base64}`）で描画し、`URL.createObjectURL` は
+ * revoke 漏れを避けるため使わない。画像内容の解釈・加工はここでも一切行わない
+ * （表示するだけで、送信内容は Attachment.base64 の実体をそのまま使う）。
  */
 import { useState } from 'react';
 import type { Attachment } from '../lib/attachment.js';
 import { formatBytes } from '../lib/attachment.js';
 
 const PREVIEW_DISPLAY_LIMIT = 20_000;
+
+/** kind === 'image' の Attachment を data URL へ変換する（表示専用）。 */
+function toDataUrl(attachment: Attachment): string {
+  return `data:${attachment.mimeType};base64,${attachment.base64}`;
+}
 
 interface AttachmentChipsProps {
   attachments: Attachment[];
@@ -37,11 +49,20 @@ export function AttachmentChips({ attachments, onRemove, disabled }: AttachmentC
         >
           <button
             type="button"
-            className="max-w-48 truncate hover:underline"
+            className="flex max-w-48 items-center gap-1 truncate hover:underline"
             onClick={() => setPreviewId(attachment.id)}
             title="クリックして内容をプレビュー"
           >
-            {attachment.filename} · {formatBytes(attachment.byteSize)}
+            {attachment.kind === 'image' && (
+              <img
+                src={toDataUrl(attachment)}
+                alt=""
+                className="h-4 w-4 shrink-0 rounded-sm object-cover"
+              />
+            )}
+            <span className="truncate">
+              {attachment.filename} · {formatBytes(attachment.byteSize)}
+            </span>
           </button>
           <button
             type="button"
@@ -66,13 +87,23 @@ export function AttachmentChips({ attachments, onRemove, disabled }: AttachmentC
                     閉じる
                   </button>
                 </div>
-                <pre className="whitespace-pre-wrap break-words text-xs font-mono text-text">
-                  {previewing.text.slice(0, PREVIEW_DISPLAY_LIMIT)}
-                </pre>
-                {previewing.text.length > PREVIEW_DISPLAY_LIMIT && (
-                  <p className="mt-1 text-xs text-muted">
-                    （全{previewing.text.length}文字中、先頭{PREVIEW_DISPLAY_LIMIT}文字を表示）
-                  </p>
+                {previewing.kind === 'image' ? (
+                  <img
+                    src={toDataUrl(previewing)}
+                    alt={previewing.filename}
+                    className="max-h-60 w-auto max-w-full object-contain"
+                  />
+                ) : (
+                  <>
+                    <pre className="whitespace-pre-wrap break-words text-xs font-mono text-text">
+                      {previewing.text.slice(0, PREVIEW_DISPLAY_LIMIT)}
+                    </pre>
+                    {previewing.text.length > PREVIEW_DISPLAY_LIMIT && (
+                      <p className="mt-1 text-xs text-muted">
+                        （全{previewing.text.length}文字中、先頭{PREVIEW_DISPLAY_LIMIT}文字を表示）
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             </>

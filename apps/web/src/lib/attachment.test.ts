@@ -8,9 +8,13 @@ import {
   MAX_ATTACHMENT_BYTES,
   MAX_TOTAL_ATTACHMENT_BYTES,
   MAX_TOTAL_TEXT_CHARS,
+  ALLOWED_IMAGE_MIME_TYPES,
   shouldAttachPaste,
   uniqueFilename,
   mimeTypeForFilename,
+  imageExtensionForMimeType,
+  detectImageMimeType,
+  bytesToBase64,
   validateFilename,
   validateAttachments,
   combinedTextLength,
@@ -25,8 +29,43 @@ function attachment(overrides: Partial<Attachment> = {}): Attachment {
     id: 'a1',
     filename: 'note.txt',
     mimeType: 'text/plain',
+    kind: 'text',
     text,
+    base64: '',
     byteSize: new TextEncoder().encode(text).length,
+    ...overrides,
+  };
+}
+
+/** サイクル1.35: テスト用の画像バイト列（server 側 attachment.test.ts と同じフィクスチャ）。 */
+function pngBytes(): Uint8Array {
+  return new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+}
+function jpegBytes(): Uint8Array {
+  return new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+}
+function gif87aBytes(): Uint8Array {
+  return new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x01, 0x00, 0x01, 0x00]);
+}
+function gif89aBytes(): Uint8Array {
+  return new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00]);
+}
+function webpBytes(): Uint8Array {
+  return new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+  ]);
+}
+
+function imageAttachment(overrides: Partial<Attachment> = {}): Attachment {
+  const bytes = pngBytes();
+  return {
+    id: 'img1',
+    filename: 'pasted-image.png',
+    mimeType: 'image/png',
+    kind: 'image',
+    text: '',
+    base64: bytesToBase64(bytes),
+    byteSize: bytes.length,
     ...overrides,
   };
 }
@@ -192,4 +231,79 @@ test('60. [ドリフト検出] web と server の添付上限4定数が一致す
   assert.equal(MAX_ATTACHMENT_BYTES, extractConst('MAX_ATTACHMENT_BYTES'));
   assert.equal(MAX_TOTAL_ATTACHMENT_BYTES, extractConst('MAX_TOTAL_ATTACHMENT_BYTES'));
   assert.equal(MAX_TOTAL_TEXT_CHARS, extractConst('MAX_TOTAL_TEXT_CHARS'));
+});
+
+test('214. [ドリフト検出] ALLOWED_IMAGE_MIME_TYPES が web と server で一致する（サイクル1.35、#60と同じテキスト照合方式）', () => {
+  const serverPath = fileURLToPath(new URL('../../../server/src/orchestrator/attachment.ts', import.meta.url));
+  const serverSource = readFileSync(serverPath, 'utf-8');
+  const match = serverSource.match(/export const ALLOWED_IMAGE_MIME_TYPES = \[([^\]]*)\] as const;/);
+  assert.ok(match, `server 側に export const ALLOWED_IMAGE_MIME_TYPES = [...] as const; が見つかりません（パス: ${serverPath}）`);
+  const serverValues = match![1]
+    .split(',')
+    .map((s) => s.trim().replace(/^'|'$/g, ''))
+    .filter((s) => s.length > 0);
+  assert.deepEqual([...ALLOWED_IMAGE_MIME_TYPES].sort(), serverValues.sort());
+});
+
+/* ===== サイクル1.35: 画像添付（フェーズ2） ===== */
+
+test('215. detectImageMimeType（web版）: PNG/JPEG/GIF87a/GIF89a/WebP の各シグネチャを正しく判定する', () => {
+  assert.equal(detectImageMimeType(pngBytes()), 'image/png');
+  assert.equal(detectImageMimeType(jpegBytes()), 'image/jpeg');
+  assert.equal(detectImageMimeType(gif87aBytes()), 'image/gif');
+  assert.equal(detectImageMimeType(gif89aBytes()), 'image/gif');
+  assert.equal(detectImageMimeType(webpBytes()), 'image/webp');
+});
+
+test('216. detectImageMimeType（web版）: 先頭が一致しないバイト列・短すぎるバッファは null を返す', () => {
+  assert.equal(detectImageMimeType(new TextEncoder().encode('hello world')), null);
+  assert.equal(detectImageMimeType(new Uint8Array([])), null);
+  assert.equal(detectImageMimeType(new Uint8Array([0x89, 0x50])), null);
+});
+
+test('217. imageExtensionForMimeType: 4形式のマッピング', () => {
+  assert.equal(imageExtensionForMimeType('image/png'), '.png');
+  assert.equal(imageExtensionForMimeType('image/jpeg'), '.jpg');
+  assert.equal(imageExtensionForMimeType('image/gif'), '.gif');
+  assert.equal(imageExtensionForMimeType('image/webp'), '.webp');
+});
+
+test('218. toWireAttachments: kind:"image" は base64 フィールドをそのまま使い（再エンコードしない）、テキストは従来どおり。順序も保持する', () => {
+  const items = [
+    attachment({ id: 'a1', filename: 'first.txt', text: 'hello world' }),
+    imageAttachment({ id: 'a2', filename: 'pasted-image.png' }),
+  ];
+  const wire = toWireAttachments(items);
+  assert.equal(wire.length, 2);
+  assert.equal(wire[0].filename, 'first.txt');
+  assert.equal(Buffer.from(wire[0].content, 'base64').toString('utf-8'), 'hello world');
+  assert.equal(wire[1].filename, 'pasted-image.png');
+  assert.equal(wire[1].mimeType, 'image/png');
+  assert.equal(wire[1].content, items[1].base64, '画像は item.base64 をそのまま使う（再エンコードしない）');
+});
+
+test('219. combinedTextLength: kind:"image" の添付は文字数に数えない（テキスト＋画像混在でも画像分は0扱い）', () => {
+  assert.equal(combinedTextLength('本文', [imageAttachment()]), 2);
+  const items = [attachment({ text: 'ab' }), imageAttachment(), attachment({ id: 'a3', filename: 'f2.txt', text: 'cde' })];
+  assert.equal(combinedTextLength('hello', items), 5 + 2 + 3);
+});
+
+test('220. validateAttachments: kind:"image" は \\uFFFD 検査の対象外（画像は text が空文字のため通常は問題ないが、対象外であることを機械確認する）だがサイズ判定の対象内', () => {
+  // 画像は \uFFFD 混入検査の対象外（server 側と同じ「画像は UTF-8 検査を経由しない」という設計を反映）。
+  assert.equal(validateAttachments([imageAttachment({ text: 'broken\uFFFDtext' })]), null);
+  // サイズ判定は画像も対象内。
+  const oversized = imageAttachment({ byteSize: MAX_ATTACHMENT_BYTES + 1 });
+  assert.notEqual(validateAttachments([oversized]), null);
+});
+
+test('221. uniqueFilename: pasted-image.png の採番も pasted-text.txt と同じ規則（-2, -3, …）に従う', () => {
+  assert.equal(uniqueFilename('pasted-image.png', ['pasted-image.png']), 'pasted-image-2.png');
+  assert.equal(
+    uniqueFilename('pasted-image.png', ['pasted-image.png', 'pasted-image-2.png']),
+    'pasted-image-3.png'
+  );
+});
+
+test('222. ALLOWED_IMAGE_MIME_TYPES は4形式（png/jpeg/gif/webp）から成る', () => {
+  assert.deepEqual([...ALLOWED_IMAGE_MIME_TYPES].sort(), ['image/gif', 'image/jpeg', 'image/png', 'image/webp']);
 });

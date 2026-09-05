@@ -18,7 +18,15 @@ class FakeApiError extends Error {
 }
 
 function makeAttachment(filename: string): Attachment {
-  return { id: `att-${filename}`, filename, mimeType: 'text/plain', text: 'hello', byteSize: 5 };
+  return {
+    id: `att-${filename}`,
+    filename,
+    mimeType: 'text/plain',
+    kind: 'text',
+    text: 'hello',
+    base64: '',
+    byteSize: 5,
+  };
 }
 
 test('51. performSend: 成功時は content/attachments がクリアされ、send は trim 済み本文と wire 形式の添付を1回だけ受け取る', async () => {
