@@ -13,6 +13,10 @@
  * - 添付は core `submit_instruction` の attachments へそのまま載る（instruction 本文には
  *   一切展開しない＝仕様5）。onSend の第3引数（wire 形式: filename/mimeType/content(base64)）
  *   としてのみ親へ渡す。
+ *
+ * サイクル1.29: 送信の成否判定とクリア/保持の遷移は `lib/composer-send.ts` の
+ * `performSend` に切り出した（DOM 無しのテストランナーからこの判断ロジックだけを
+ * テストするため）。ここでは戻り値をそのまま setState するだけにする。
  */
 import { useRef, useState } from 'react';
 import type { DragEvent } from 'react';
@@ -22,12 +26,13 @@ import {
   uniqueFilename,
   mimeTypeForFilename,
   validateAttachments,
-  toWireAttachments,
   type Attachment,
+  type WireAttachment,
 } from '../lib/attachment.js';
+import { performSend } from '../lib/composer-send.js';
 import { AttachmentChips } from './AttachmentChips.js';
 
-export type WireAttachment = ReturnType<typeof toWireAttachments>[number];
+export type { WireAttachment };
 
 interface ComposerProps {
   disabled: boolean;
@@ -66,7 +71,8 @@ export function Composer({ disabled, onSend }: ComposerProps) {
       });
     }
     const merged = [...attachments, ...added];
-    const reason = validateAttachments(merged);
+    // サイクル1.29: 追加した時点で本文込みの合計文字数上限も評価する（送信前に気づけるように）。
+    const reason = validateAttachments(merged, content.trim());
     if (reason) {
       setError(reason);
       return;
@@ -140,11 +146,11 @@ export function Composer({ disabled, onSend }: ComposerProps) {
     }
     setSending(true);
     try {
-      await onSend(trimmed, council, toWireAttachments(attachments));
-      setContent('');
-      setAttachments([]);
-      setError(null);
-      // council のチェック状態は送信後も維持する（連続で協議付き投入したい場合の意図を保つ）。
+      const next = await performSend({ content, attachments, error: null }, (c, a) => onSend(c, council, a));
+      setContent(next.content);
+      setAttachments([...next.attachments]);
+      setError(next.error);
+      // council のチェック状態は送受信の成否に関わらず維持する（連続で協議付き投入したい場合の意図を保つ）。
     } finally {
       setSending(false);
     }

@@ -1,15 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   PASTE_ATTACH_THRESHOLD,
   MAX_ATTACHMENT_COUNT,
   MAX_ATTACHMENT_BYTES,
   MAX_TOTAL_ATTACHMENT_BYTES,
+  MAX_TOTAL_TEXT_CHARS,
   shouldAttachPaste,
   uniqueFilename,
   mimeTypeForFilename,
   validateFilename,
   validateAttachments,
+  combinedTextLength,
   formatBytes,
   toWireAttachments,
   type Attachment,
@@ -145,4 +149,47 @@ test('48. toWireAttachments: base64 往復でテキストが一致し、filename
   assert.equal(wire[1].filename, 'second.md');
   assert.equal(wire[1].mimeType, 'text/markdown');
   assert.equal(Buffer.from(wire[1].content, 'base64').toString('utf-8'), '日本語のテキスト');
+});
+
+test('58. combinedTextLength: 本文＋添付全文の合計文字数（添付ゼロなら本文長そのもの）', () => {
+  assert.equal(combinedTextLength('hello', []), 5);
+  const items = [attachment({ text: 'ab' }), attachment({ id: 'a2', filename: 'f2.txt', text: 'cde' })];
+  assert.equal(combinedTextLength('hello', items), 5 + 2 + 3);
+});
+
+test('59. validateAttachments: 合計文字数がちょうど上限なら null、1文字超で拒否する（サイクル1.29）', () => {
+  // 添付側でちょうど上限に達するケース。
+  const exact = [attachment({ text: 'a'.repeat(MAX_TOTAL_TEXT_CHARS) })];
+  assert.equal(validateAttachments(exact, ''), null);
+  const overByAttachment = [attachment({ text: 'a'.repeat(MAX_TOTAL_TEXT_CHARS + 1) })];
+  const reason1 = validateAttachments(overByAttachment, '');
+  assert.notEqual(reason1, null);
+  assert.match(reason1 ?? '', new RegExp(String(MAX_TOTAL_TEXT_CHARS)));
+  assert.match(reason1 ?? '', /要約・切り詰めは行いません/);
+
+  // 本文側を足したことで超えるケース（添付は上限未満）。
+  const smallAttachment = [attachment({ text: 'a'.repeat(100) })];
+  assert.equal(validateAttachments(smallAttachment, 'b'.repeat(MAX_TOTAL_TEXT_CHARS - 100)), null);
+  const reason2 = validateAttachments(smallAttachment, 'b'.repeat(MAX_TOTAL_TEXT_CHARS - 100 + 1));
+  assert.notEqual(reason2, null);
+
+  // content 省略時（既定 ''）は 1.28 以前と同じ挙動（添付単体のみで判定）。
+  assert.equal(validateAttachments([attachment({ text: 'short' })]), null);
+});
+
+test('60. [ドリフト検出] web と server の添付上限4定数が一致する（server/src/orchestrator/attachment.ts をテキスト照合）', () => {
+  const serverPath = fileURLToPath(new URL('../../../server/src/orchestrator/attachment.ts', import.meta.url));
+  const serverSource = readFileSync(serverPath, 'utf-8');
+
+  function extractConst(name: string): number {
+    const re = new RegExp(`export const ${name} = ([\\d_]+);`);
+    const match = serverSource.match(re);
+    assert.ok(match, `server 側に export const ${name} = <数値>; が見つかりません（パス: ${serverPath}）`);
+    return Number(match![1].replace(/_/g, ''));
+  }
+
+  assert.equal(MAX_ATTACHMENT_COUNT, extractConst('MAX_ATTACHMENT_COUNT'));
+  assert.equal(MAX_ATTACHMENT_BYTES, extractConst('MAX_ATTACHMENT_BYTES'));
+  assert.equal(MAX_TOTAL_ATTACHMENT_BYTES, extractConst('MAX_TOTAL_ATTACHMENT_BYTES'));
+  assert.equal(MAX_TOTAL_TEXT_CHARS, extractConst('MAX_TOTAL_TEXT_CHARS'));
 });

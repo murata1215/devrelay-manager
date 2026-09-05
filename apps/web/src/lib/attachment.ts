@@ -8,6 +8,10 @@
  * （types.ts と同じ「import で結ばず手動同期」方針。web と server は別ワークスペースで
  * ビルド成果物を共有しないため）。特に MAX_TOTAL_TEXT_CHARS の導出根拠（140,000 文字）は
  * server 側ファイルの冒頭コメントに全文を書いてあるので、変更時はそちらを正として参照すること。
+ *
+ * サイクル1.29: 「手動同期」が壊れても気づけるよう、attachment.test.ts にドリフト検出テスト
+ * （#60）を追加した。server 側の定数値が変わったのにここを直し忘れると、そのテストが
+ * server の attachment.ts をテキストとして読み取って値を突合し、確実に落ちる。
  */
 
 /** 貼り付けを添付化する閾値。これを「超えた」場合のみ添付化する（2000 ちょうどは本文へ挿入）。 */
@@ -44,6 +48,19 @@ export interface Attachment {
   text: string;
   /** UTF-8 エンコード後の生バイト数（上限判定・UI 表示に使う）。 */
   byteSize: number;
+}
+
+/**
+ * core `submit_instruction` の attachments 1件が要求するワイヤ形式（サイクル1.28）。
+ * サイクル1.29: `composer-send.ts` からも参照するため `Composer.tsx` 側の
+ * `ReturnType<typeof toWireAttachments>[number]` 由来の型定義をやめてここへ集約した
+ * （lib → components という逆向き依存を避けるため）。
+ */
+export interface WireAttachment {
+  filename: string;
+  mimeType: AllowedAttachmentMimeType;
+  /** base64 エンコード済みの本文。 */
+  content: string;
 }
 
 /** 貼り付けテキストを添付化すべきか（UTF-16 code unit 長で判定。2000 ちょうどは false）。 */
@@ -125,6 +142,17 @@ export function formatBytes(n: number): string {
 }
 
 /**
+ * 本文＋添付全文の合計文字数（UTF-16 code unit 長。JS の `string.length` と同じ数え方）。
+ * サイクル1.29: server 側 `apps/server/src/orchestrator/attachment.ts` の
+ * `combinedTextLength(content, decoded)` と完全に同じ定義にする（content.length + 各 text.length の和）。
+ * server はこの値を `parsed.data.content`（= web が送る `content.trim()`）に対して評価するため、
+ * 呼び出し側（validateAttachments）も trim 済みの本文を渡すこと。
+ */
+export function combinedTextLength(content: string, items: readonly Pick<Attachment, 'text'>[]): number {
+  return content.length + items.reduce((sum, item) => sum + item.text.length, 0);
+}
+
+/**
  * 添付一覧の妥当性を検証する。最初に見つかったエラーを読める理由文字列で返し、
  * すべて妥当なら null を返す。
  * - 件数は MAX_ATTACHMENT_COUNT 以下
@@ -133,8 +161,13 @@ export function formatBytes(n: number): string {
  *   バイナリを .txt にリネームした場合を弾く）
  * - 各ファイルは MAX_ATTACHMENT_BYTES 以下
  * - 合計は MAX_TOTAL_ATTACHMENT_BYTES 以下
+ * - サイクル1.29: `content`（送信予定の本文。省略時は空文字＝添付単体のサイズのみを見る）を
+ *   加えた合計文字数が MAX_TOTAL_TEXT_CHARS 以下（server 側と同じ判定式・同じ上限値。
+ *   ここで弾くのは「送信前にユーザーへ知らせる」ためのクライアント側チェックであり、
+ *   server 側の拒否（routes/orchestrator.ts）を置き換えるものではない＝そちらも残る）。
+ *   超過時も要約・切り詰めは行わない（拒否のみ）。
  */
-export function validateAttachments(items: readonly Attachment[]): string | null {
+export function validateAttachments(items: readonly Attachment[], content = ''): string | null {
   if (items.length > MAX_ATTACHMENT_COUNT) {
     return `添付ファイルは最大${MAX_ATTACHMENT_COUNT}件までです（現在${items.length}件）。`;
   }
@@ -154,6 +187,13 @@ export function validateAttachments(items: readonly Attachment[]): string | null
   }
   if (total > MAX_TOTAL_ATTACHMENT_BYTES) {
     return `添付ファイルの合計サイズ（${formatBytes(total)}）が上限（${formatBytes(MAX_TOTAL_ATTACHMENT_BYTES)}）を超えています。`;
+  }
+  const textLength = combinedTextLength(content, items);
+  if (textLength > MAX_TOTAL_TEXT_CHARS) {
+    return (
+      `本文と添付ファイルの合計文字数（${textLength}文字）が上限（${MAX_TOTAL_TEXT_CHARS}文字）を超えています。` +
+      '添付を減らすか本文を短くしてください（要約・切り詰めは行いません）。'
+    );
   }
   return null;
 }
@@ -176,9 +216,7 @@ function utf8ToBase64(text: string): string {
 }
 
 /** Attachment[] を api.orchestrate() が要求するワイヤ形式へ変換する（順序を保持）。 */
-export function toWireAttachments(
-  items: readonly Attachment[]
-): Array<{ filename: string; mimeType: AllowedAttachmentMimeType; content: string }> {
+export function toWireAttachments(items: readonly Attachment[]): WireAttachment[] {
   return items.map((item) => ({
     filename: item.filename,
     mimeType: item.mimeType,

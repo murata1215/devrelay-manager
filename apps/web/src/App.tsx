@@ -17,6 +17,7 @@ import type { WireAttachment } from './components/Composer.js';
 import { ProjectPicker } from './components/ProjectPicker.js';
 import { SignIn } from './components/SignIn.js';
 import { readToken, readAuthError, clearToken, onAuthCleared } from './auth.js';
+import { canFallbackToMessageOnly } from './lib/composer-send.js';
 
 const POLL_INTERVAL_MS = 4000;
 const CORE_WEB_URL = (import.meta.env.VITE_CORE_WEB_URL as string | undefined) ?? 'https://app.devrelay.io';
@@ -138,6 +139,15 @@ export function App() {
     }
   }
 
+  /**
+   * サイクル1.29: 送信失敗時に Composer 側で本文・添付を保持できるよう、
+   * 例外を握りつぶさず rethrow する（1.28 は reportError で握って上部バナーへ出すだけ
+   * だったため、Composer.handleSend が catch できず入力をクリアしてしまっていた）。
+   *
+   * 添付ありで 404（orchestrate 未提供）の場合はフォールバックせずエラーとして
+   * rethrow する（canFallbackToMessageOnly 参照）。添付を黙って捨てるより、
+   * 本文・添付をまるごと保持して再送させる方が実害が小さいと判断した。
+   */
   async function handleSend(content: string, council: boolean, attachments: WireAttachment[]) {
     if (!selectedThreadId) {
       return;
@@ -147,22 +157,18 @@ export function App() {
       try {
         await api.orchestrate(selectedThreadId, content, selectedProjectIds, council, attachments);
       } catch (err) {
-        if (err instanceof ApiError && err.status === 404) {
-          // orchestrate 未提供（DISPATCH_WORKER_MODE=off）。メッセージのみ記録する。
-          // このフォールバックには attachments を渡す経路が無いため、添付は記録されない
-          // ことを黙って捨てずに info として明示する（サイクル1.28）。
+        if (err instanceof ApiError && canFallbackToMessageOnly(err.status, attachments.length)) {
+          // orchestrate 未提供（DISPATCH_WORKER_MODE=off）かつ添付が無い場合のみ、
+          // 1.28 と同じくメッセージのみ記録するフォールバックへ進む。
           await api.createMessage(selectedThreadId, 'user', content);
-          setInfoMessage(
-            'orchestrate は未提供です（DISPATCH_WORKER_MODE=off）。メッセージのみ記録しました。' +
-              (attachments.length > 0 ? '（添付は記録されませんでした）' : '')
-          );
+          setInfoMessage('orchestrate は未提供です（DISPATCH_WORKER_MODE=off）。メッセージのみ記録しました。');
         } else {
+          // ここで rethrow した例外は Composer.handleSend（performSend）まで伝播し、
+          // 本文・添付を保持したままエラー表示できるようにする（reportError では握らない）。
           throw err;
         }
       }
       await reload(selectedThreadId);
-    } catch (err) {
-      reportError(err);
     } finally {
       setSendDisabled(false);
     }
