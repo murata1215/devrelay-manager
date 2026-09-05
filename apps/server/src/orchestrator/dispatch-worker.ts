@@ -43,18 +43,39 @@ const AT_MOST_ONCE_STATUSES: readonly DispatchStatus[] = DISPATCH_STATUSES.filte
   (s) => nextActionFor(s)?.retry === 'at-most-once'
 );
 
+/** サイクル1.28: core へ渡す添付の形（3キーのみ。sortOrder 等は含めない）。 */
+export interface WorkerSubmitAttachment {
+  filename: string;
+  mimeType: string;
+  content: string;
+}
+
 /** worker が core に対して呼ぶ最小限の RPC 面。core/coreClient.ts の該当関数がこれを満たす。 */
 export interface WorkerCoreClient {
-  /** サイクル1.21: council は省略可（未指定なら council 無しの従来呼び出しと同形）。 */
+  /**
+   * サイクル1.21: council は省略可（未指定なら council 無しの従来呼び出しと同形）。
+   * サイクル1.28: attachments も省略可（未指定/空配列なら添付無しの従来呼び出しと同形）。
+   */
   submitInstruction(
     projectId: string,
     instruction: string,
-    council?: boolean
+    council?: boolean,
+    attachments?: readonly WorkerSubmitAttachment[]
   ): Promise<{ submissionId: string }>;
   getPlan(submissionId: string): Promise<unknown>;
   /** サイクル1.19 S3: note は省略可（未指定なら approveNote 無しの従来呼び出しと同形）。 */
   approveImplementation(projectId: string, submissionId: string, note?: string): Promise<unknown>;
   getBuildStatus(submissionId: string): Promise<unknown>;
+}
+
+/**
+ * サイクル1.28: Dispatch に紐づく DispatchAttachment を submit 直前にのみ読むための
+ * 最小インターフェース（prisma.dispatchAttachment を narrow 型へ橋渡しする）。
+ */
+export interface AttachmentReader {
+  listForDispatch(dispatchId: string): Promise<
+    Array<{ filename: string; mimeType: string; content: string; sortOrder: number }>
+  >;
 }
 
 export interface TickDeps {
@@ -64,6 +85,11 @@ export interface TickDeps {
   now: () => Date;
   limit?: number;
   log?: (message: string) => void;
+  /**
+   * サイクル1.28: 未注入（undefined）なら従来と完全同形（submitInstruction の第4引数は
+   * 常に undefined）。注入時のみ handleSubmitInstruction が submit 直前に読みに行く。
+   */
+  attachments?: AttachmentReader;
 }
 
 export type TickOutcomeKind = 'transitioned' | 'noted' | 'skipped' | 'error';
@@ -196,10 +222,25 @@ async function handleSubmitInstruction(
   if (row.instruction == null) {
     return { id: row.id, status, outcome: 'error', detail: 'instruction が未設定です（不変条件違反）' };
   }
+  let attachmentsArg: WorkerSubmitAttachment[] | undefined;
+  if (deps.attachments) {
+    // サイクル1.28: リーダが注入されているときだけ submit 直前に読む。
+    // sortOrder 昇順（= orchestrate 時に組み立てた順序）へ並べ直してから3キーへ射影する。
+    const rows = await deps.attachments.listForDispatch(row.id);
+    attachmentsArg = [...rows]
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((a) => ({ filename: a.filename, mimeType: a.mimeType, content: a.content }));
+  }
   let result: { submissionId: string };
   try {
     // サイクル1.21: council=true の行だけ第3引数に true を渡す（従来行は undefined で従来同形）。
-    result = await deps.core.submitInstruction(row.projectId, row.instruction, row.council ? true : undefined);
+    // サイクル1.28: attachments はリーダ未注入なら常に undefined（従来と完全同形の呼び出し）。
+    result = await deps.core.submitInstruction(
+      row.projectId,
+      row.instruction,
+      row.council ? true : undefined,
+      attachmentsArg
+    );
   } catch (err) {
     // at-most-once: 結果不明。ここで stopped にはしない（実は成功している可能性がある）。
     // lastPolledAt は claim 済みなので、この行は以後 tick から見えなくなり、
@@ -448,6 +489,8 @@ export interface StartDispatchWorkerDeps {
   core: WorkerCoreClient;
   intervalMs?: number;
   log?: (message: string) => void;
+  /** サイクル1.28: 未注入なら従来と完全同形（attachments 無しで tick する）。 */
+  attachments?: AttachmentReader;
 }
 
 export interface DispatchWorkerHandle {
@@ -468,7 +511,13 @@ export function startDispatchWorker(deps: StartDispatchWorkerDeps): DispatchWork
   async function runOnce(): Promise<void> {
     if (stopped) return;
     try {
-      const report = await tick({ client: deps.client, core: deps.core, now: () => new Date(), log: deps.log });
+      const report = await tick({
+        client: deps.client,
+        core: deps.core,
+        now: () => new Date(),
+        log: deps.log,
+        attachments: deps.attachments,
+      });
       if (report.transitioned > 0 || report.errors.length > 0) {
         deps.log?.(
           `dispatch tick: scanned=${report.scanned} transitioned=${report.transitioned} errors=${report.errors.length}`

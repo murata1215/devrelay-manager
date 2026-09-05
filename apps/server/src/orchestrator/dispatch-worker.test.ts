@@ -44,9 +44,13 @@ function createStubCore(overrides: Partial<WorkerCoreClient> = {}): {
     getBuildStatus: [],
   };
   const core: WorkerCoreClient = {
-    async submitInstruction(projectId, instruction, council) {
-      calls.submitInstruction.push([projectId, instruction, council]);
-      if (overrides.submitInstruction) return overrides.submitInstruction(projectId, instruction, council);
+    async submitInstruction(projectId, instruction, council, attachments) {
+      // サイクル1.28: attachments が undefined のときは従来と同形の3要素配列のまま記録する
+      // （#165 等の既存アサーションを壊さない）。渡された場合のみ4要素目として追加する。
+      calls.submitInstruction.push(
+        attachments === undefined ? [projectId, instruction, council] : [projectId, instruction, council, attachments]
+      );
+      if (overrides.submitInstruction) return overrides.submitInstruction(projectId, instruction, council, attachments);
       throw new Error('submitInstruction は呼ばれない想定のテストです');
     },
     async getPlan(submissionId) {
@@ -350,4 +354,51 @@ test('165. tick: row.council=false は submitInstruction 第3引数が undefined
   });
   await tick({ client: clientOn, core: coreOn, now: () => new Date('2026-08-25T00:01:00Z') });
   assert.deepEqual(coreCallsOn.submitInstruction[0], ['proj_1', 'y', true]);
+});
+
+test('211. tick: attachments リーダ未注入なら submitInstruction の第4引数は undefined（1.27 以前と完全同形）', async () => {
+  const r = row({ id: 'd1', status: 'submitting', instruction: 'x' });
+  const { client } = createStubQueryClient({ rows: [r] });
+  const { core, calls } = createStubCore({
+    async submitInstruction() {
+      return { submissionId: 'sub_no_reader' };
+    },
+  });
+  await tick({ client, core, now: () => new Date('2026-08-25T00:01:00Z') });
+  assert.deepEqual(calls.submitInstruction[0], ['proj_1', 'x', undefined]);
+});
+
+test('212. tick: attachments リーダが注入されていれば sortOrder 昇順に並べ替えて submitInstruction の第4引数に3キーだけで渡す（サイクル1.28）', async () => {
+  const r = row({ id: 'd1', status: 'submitting', instruction: 'x' });
+  const { client } = createStubQueryClient({ rows: [r] });
+  const { core, calls } = createStubCore({
+    async submitInstruction() {
+      return { submissionId: 'sub_with_attachments' };
+    },
+  });
+  const listForDispatchCalls: string[] = [];
+  await tick({
+    client,
+    core,
+    now: () => new Date('2026-08-25T00:01:00Z'),
+    attachments: {
+      async listForDispatch(dispatchId) {
+        listForDispatchCalls.push(dispatchId);
+        // わざと sortOrder が逆順に返ってくるスタブにして、並べ替えが効くことを確認する。
+        return [
+          { filename: 'note.md', mimeType: 'text/markdown', content: 'd29ybGQ=', sortOrder: 1 },
+          { filename: 'pasted-text.txt', mimeType: 'text/plain', content: 'aGVsbG8=', sortOrder: 0 },
+        ];
+      },
+    },
+  });
+  assert.deepEqual(listForDispatchCalls, ['d1']);
+  const call = calls.submitInstruction[0] as [string, string, boolean | undefined, unknown];
+  assert.equal(call[0], 'proj_1');
+  assert.equal(call[1], 'x');
+  assert.equal(call[2], undefined);
+  assert.deepEqual(call[3], [
+    { filename: 'pasted-text.txt', mimeType: 'text/plain', content: 'aGVsbG8=' },
+    { filename: 'note.md', mimeType: 'text/markdown', content: 'd29ybGQ=' },
+  ]);
 });

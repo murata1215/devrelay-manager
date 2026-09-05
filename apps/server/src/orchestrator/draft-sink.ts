@@ -37,6 +37,21 @@ export interface DraftCreateInput {
    * 未指定時は Prisma の `@default(false)` に委ねる（省略可能）。
    */
   council?: boolean;
+  /**
+   * サイクル1.28: チャット入力へのテキスト添付（フェーズ1）。orchestrator/attachment.ts の
+   * validateAttachments が返す decoded 配列をそのまま渡す想定（順序 = core へ渡す順序）。
+   * 未指定/空配列のときは DispatchAttachment を1行も作らない（1.27 以前と同形の create）。
+   */
+  attachments?: DraftAttachmentInput[];
+}
+
+/** DraftCreateInput.attachments の1要素（DispatchAttachment 行の作成に必要な分だけ）。 */
+export interface DraftAttachmentInput {
+  filename: string;
+  mimeType: string;
+  /** base64 エンコード済み本体（core へ渡す content と同一形式）。 */
+  content: string;
+  byteSize: number;
 }
 
 export interface CreatedDraft {
@@ -60,6 +75,16 @@ interface DispatchCreateArgs {
     outputTokens?: number | null;
     responseModel?: string | null;
     council?: boolean;
+    /** サイクル1.28: prisma のネストした create（DispatchAttachment を同時作成する）。 */
+    attachments?: {
+      create: Array<{
+        filename: string;
+        mimeType: string;
+        content: string;
+        byteSize: number;
+        sortOrder: number;
+      }>;
+    };
   };
 }
 
@@ -94,6 +119,19 @@ export function prismaDraftSink(client: DraftCreateClient): DraftSink {
       // 従来と完全同形の data（キー集合）を保ち、Prisma の @default(false) に委ねる。
       if (input.council === true) {
         data.council = true;
+      }
+      // サイクル1.28: attachments が非空のときだけキーを足す（1.27 以前と完全同形を保つ）。
+      // sortOrder は配列順（= core へ渡す順序）をそのまま採番する。
+      if (input.attachments !== undefined && input.attachments.length > 0) {
+        data.attachments = {
+          create: input.attachments.map((a, i) => ({
+            filename: a.filename,
+            mimeType: a.mimeType,
+            content: a.content,
+            byteSize: a.byteSize,
+            sortOrder: i,
+          })),
+        };
       }
       const row = await client.create({ data });
       return { id: row.id };

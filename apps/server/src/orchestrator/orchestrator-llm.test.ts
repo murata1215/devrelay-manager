@@ -287,3 +287,55 @@ test('164. orchestrate: input.council 未指定なら createDraft 引数に coun
   await orchestrate(depsOn, baseInput({ council: true }));
   assert.equal(callsOn[0].council, true);
 });
+
+/** サイクル1.28: complete() に渡る user 文字列を記録する（buildAttachmentContext の結線確認用）。 */
+function capturingUserLlm(raw: string): { llm: LlmPort; users: string[] } {
+  const users: string[] = [];
+  const completion: LlmCompletion = {
+    text: raw,
+    model: 'claude-sonnet-5',
+    usage: { inputTokens: 1, outputTokens: 1 },
+  };
+  const llm: LlmPort = {
+    async complete(request) {
+      users.push(request.user);
+      return completion;
+    },
+  };
+  return { llm, users };
+}
+
+test('209. orchestrate: attachments 未指定/空配列なら complete() の user が input.content と1バイトも変わらない（1.27 以前と同形）', async () => {
+  const { sink } = recordingSink();
+  const { llm, users } = capturingUserLlm(JSON.stringify({ kind: 'conversation', reply: 'こんにちは' }));
+  const deps: OrchestrateDeps = { llm, draft: sink, settings: settings() };
+  await orchestrate(deps, baseInput({ content: '本文だけ', attachments: [] }));
+  assert.equal(users[0], '本文だけ');
+});
+
+test('210. orchestrate: attachments 指定時は complete() の user に添付全文が verbatim で連結され、createDraft にも attachments が渡る（instruction 本文には展開しない）', async () => {
+  const dispatchJson = JSON.stringify({ kind: 'dispatch', projectId: 'proj-1', intent: 'exec', body: '本文' });
+  const { sink, calls } = recordingSink();
+  const { llm, users } = capturingUserLlm(dispatchJson);
+  const deps: OrchestrateDeps = { llm, draft: sink, settings: settings() };
+  const attachments = [
+    { filename: 'pasted-text.txt', mimeType: 'text/plain', content: 'aGVsbG8=', text: '添付本文', byteSize: 4 },
+  ];
+  const result = await orchestrate(deps, baseInput({ content: '本文だけ', attachments }));
+
+  // LLM への user 入力には添付全文が verbatim で連結される（仕様4）。
+  assert.ok(users[0].includes('本文だけ'));
+  assert.ok(users[0].includes('--- 添付ファイル: pasted-text.txt ---'));
+  assert.ok(users[0].includes('添付本文'));
+
+  // instruction 本文（governance 適用済み）には添付が一切展開されない（仕様5）。
+  assert.equal(result.kind, 'proposal');
+  if (result.kind === 'proposal') {
+    assert.equal(result.instruction.includes('添付本文'), false);
+  }
+
+  // draft.createDraft には filename/mimeType/content/byteSize が転送される。
+  assert.equal(calls[0].attachments?.length, 1);
+  assert.equal(calls[0].attachments?.[0].filename, 'pasted-text.txt');
+  assert.equal(calls[0].attachments?.[0].content, 'aGVsbG8=');
+});

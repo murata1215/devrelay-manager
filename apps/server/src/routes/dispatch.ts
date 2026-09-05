@@ -22,6 +22,7 @@ import {
   approveTargetHttpStatus,
 } from '../orchestrator/dispatch-gates.js';
 import { tick, reconcileOrphans } from '../orchestrator/dispatch-worker.js';
+import type { AttachmentReader } from '../orchestrator/dispatch-worker.js';
 import * as coreClient from '../core/coreClient.js';
 import { readManagerSettingsFile } from '../orchestrator/manager-settings.js';
 import {
@@ -61,6 +62,20 @@ const workerCore = {
   getPlan: coreClient.getPlan,
   approveImplementation: coreClient.approveImplementation,
   getBuildStatus: coreClient.getBuildStatus,
+};
+
+/**
+ * サイクル1.28: DispatchAttachment を submit 直前にのみ読む。一覧 API（GET /threads/:id/dispatches・
+ * GET /dispatch/:id）には一切登場させない（base64 本体を4秒ポーリングに載せないための設計）。
+ */
+const attachmentReader: AttachmentReader = {
+  async listForDispatch(dispatchId) {
+    return prisma.dispatchAttachment.findMany({
+      where: { dispatchId },
+      orderBy: { sortOrder: 'asc' },
+      select: { filename: true, mimeType: true, content: true, sortOrder: true },
+    });
+  },
 };
 
 // サイクル1.19 S2: projectId は任意。指定時のみ投げ先を差し替える。
@@ -216,7 +231,7 @@ export async function dispatchRoutes(app: FastifyInstance) {
   // DISPATCH_WORKER_MODE=manual 用の単発 tick 実行口。
   app.post('/dispatch/tick', async (_request, reply) => {
     const now = () => new Date();
-    const tickReport = await tick({ client: dispatchClient, core: workerCore, now });
+    const tickReport = await tick({ client: dispatchClient, core: workerCore, now, attachments: attachmentReader });
     const orphanReport = await reconcileOrphans({ client: dispatchClient, now });
     return reply.status(200).send({ tick: tickReport, reconcileOrphans: orphanReport });
   });

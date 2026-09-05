@@ -36,6 +36,24 @@ import {
   describeAnthropicError,
 } from '../llm/anthropic-llm.js';
 import type { MessagesCreateClient } from '../llm/anthropic-llm.js';
+import {
+  ALLOWED_ATTACHMENT_MIME_TYPES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_TOTAL_TEXT_CHARS,
+  validateAttachments,
+  combinedTextLength,
+} from '../orchestrator/attachment.js';
+
+// サイクル1.28: チャット入力へのテキスト添付（フェーズ1）。厳密な内容検証（サイズ・
+// MIME・base64・UTF-8）は attachment.ts の validateAttachments が担当するため、ここでは
+// 型と件数（core 実測値と同じ上限）のみを zod で弾く。
+const attachmentItemSchema = z
+  .object({
+    filename: z.string().min(1),
+    mimeType: z.enum(ALLOWED_ATTACHMENT_MIME_TYPES),
+    content: z.string().min(1),
+  })
+  .strict();
 
 const orchestrateSchema = z.object({
   content: z.string().min(1),
@@ -47,6 +65,8 @@ const orchestrateSchema = z.object({
   // サイクル1.21: claude↔codex の協議（council）を有効化するオプトイン。未指定/false は
   // 従来と完全同形の挙動を保つ（Dispatch.council は @default(false)）。
   council: z.boolean().optional(),
+  // サイクル1.28: 未指定/空配列は 1.27 以前と完全同形の挙動を保つ。
+  attachments: z.array(attachmentItemSchema).max(MAX_ATTACHMENT_COUNT).optional(),
 });
 
 /**
@@ -114,6 +134,21 @@ export async function orchestratorRoutes(app: FastifyInstance) {
         });
       }
 
+      // サイクル1.28: 添付検証も副作用（Message 行の作成）より前に済ませる
+      // （1.13 と同じ「副作用の前に検証」の踏襲。孤児 Message 行を作らない）。
+      const attachmentValidation = validateAttachments(parsed.data.attachments ?? []);
+      if (!attachmentValidation.ok) {
+        return reply.status(400).send({ error: attachmentValidation.reason, code: attachmentValidation.code });
+      }
+      const decodedAttachments = attachmentValidation.decoded;
+      if (combinedTextLength(parsed.data.content, decodedAttachments) > MAX_TOTAL_TEXT_CHARS) {
+        return reply.status(400).send({
+          error:
+            `本文と添付ファイルの合計文字数が上限（${MAX_TOTAL_TEXT_CHARS}文字）を超えています。` +
+            '添付を減らすか本文を短くしてください（要約・切り詰めは行いません）。',
+        });
+      }
+
       const message = await prisma.message.create({
         data: { threadId: request.params.threadId, role: 'user', content: parsed.data.content },
       });
@@ -144,6 +179,7 @@ export async function orchestratorRoutes(app: FastifyInstance) {
           tierOverride,
           preferredProjectIds: parsed.data.projectIds,
           council: parsed.data.council,
+          attachments: decodedAttachments,
         });
 
         // サイクル1.24: spec §9 の会話枝は Dispatch を作らないため、返答を Message として

@@ -9,7 +9,7 @@
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { buildSubmitInstructionArgs } from './submit-args.js';
+import { buildSubmitInstructionArgs, type SubmitInstructionAttachment } from './submit-args.js';
 
 const CLIENT_NAME = 'devrelay-manager';
 const CLIENT_VERSION = '0.1.0';
@@ -178,20 +178,24 @@ export async function listProjects(): Promise<CoreProject[]> {
  * 対象プロジェクトへ指示を投入する。
  *
  * サイクル1.21: council は「claude↔codex の協議を有効化する」オプトイン。
- * 【重要・実測】core の submit_instruction は現時点で council を受け取らない
+ * 【重要・実測】core の submit_instruction は当時 council を受け取らなかった
  * （tools/list の inputSchema は projectId/instruction のみ）。council が true でも
  * 未知引数として core に静かに捨てられ、submit 自体は成功する（実測確認済み）。
- * 引数組み立ては submit-args.ts の純関数へ切り出してあり、未指定/false のときは
- * 従来と完全同形の呼び出しになる。
+ *
+ * サイクル1.28: attachments はチャット入力へのテキスト添付（フェーズ1）。core #358 で
+ * 実装された attachments 引数（filename/mimeType/content の3キー、最大10件・1件5MB・
+ * 合計10MB）をそのまま渡す。空配列/未指定のときは従来と完全同形の呼び出しになる。
+ * 引数組み立ては submit-args.ts の純関数へ切り出してある。
  */
 export async function submitInstruction(
   projectId: string,
   instruction: string,
-  council?: boolean
+  council?: boolean,
+  attachments?: readonly SubmitInstructionAttachment[]
 ): Promise<SubmitInstructionResult> {
   return callTool<SubmitInstructionResult>(
     'submit_instruction',
-    buildSubmitInstructionArgs(projectId, instruction, council)
+    buildSubmitInstructionArgs(projectId, instruction, council, attachments)
   );
 }
 

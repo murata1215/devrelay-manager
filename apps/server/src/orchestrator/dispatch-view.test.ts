@@ -165,9 +165,34 @@ test('134. serializeDispatch: ホワイトリスト外のプロパティは出�
   assert.deepEqual(Object.keys(result).sort(), Object.keys(dummyDispatch()).sort());
 });
 
-test('135. スキーマ整合: schema.prisma の model Dispatch のスカラー列と serializeDispatch の出力キーが完全一致する', () => {
-  const schemaPath = resolve(here, '../../prisma/schema.prisma');
-  const schema = readFileSync(schemaPath, 'utf-8');
+/**
+ * schema.prisma 全体から `model X { ... }` の宣言名を集める。
+ *
+ * サイクル1.28: 従来は「型名が Thread/Message で始まるか」という決め打ちでリレーション列を
+ * 除外していたが、DispatchAttachment リレーションの追加を機に「型名（? と [] を除去した
+ * 裸の型）が schema 内で実際に model 宣言されている名前と一致するか」へ一般化した。
+ * これにより新モデルが増えるたびに決め打ち文字列を追記する必要が無くなる一方、
+ * 「モデルとして宣言されていない名前」はスカラーとして扱われ続けるため、
+ * 見落とし（本来除外すべきリレーションを見逃す）は起きてもスカラー扱いにしかならず、
+ * #135 の目的（serializeDispatch の出力とスキーマの完全一致検査）は弱まらない。
+ */
+function collectModelNames(schema: string): Set<string> {
+  const names = new Set<string>();
+  const modelDeclRegex = /^model\s+(\w+)\s*\{/gm;
+  let m: RegExpExecArray | null;
+  while ((m = modelDeclRegex.exec(schema)) !== null) {
+    names.add(m[1]);
+  }
+  return names;
+}
+
+/** `Thread` / `Message?` / `DispatchAttachment[]` 等から裸の型名を取り出す。 */
+function bareTypeName(fieldType: string): string {
+  return fieldType.replace(/\[\]$/, '').replace(/\?$/, '');
+}
+
+/** model Dispatch のスカラー列（リレーション以外）を schema.prisma から抽出する。 */
+function extractDispatchScalarFields(schema: string, modelNames: Set<string>): string[] {
   const modelMatch = schema.match(/model Dispatch \{([\s\S]*?)\n\}/);
   assert.ok(modelMatch, 'schema.prisma に model Dispatch が見つかりません');
   const body = modelMatch![1];
@@ -181,13 +206,49 @@ test('135. スキーマ整合: schema.prisma の model Dispatch のスカラー�
     const tokens = line.split(/\s+/);
     const fieldName = tokens[0];
     const fieldType = tokens[1] ?? '';
-    // リレーション列（thread: Thread, message: Message?）は除外する。
-    if (fieldType.startsWith('Thread') || fieldType.startsWith('Message')) continue;
+    // リレーション列（thread: Thread, message: Message?, attachments: DispatchAttachment[]）は
+    // 「型名が schema 内で model 宣言されている名前と一致する」ことで除外する（決め打ち文字列に依存しない）。
+    if (modelNames.has(bareTypeName(fieldType))) continue;
     scalarFields.push(fieldName);
   }
+  return scalarFields;
+}
+
+test('135. スキーマ整合: schema.prisma の model Dispatch のスカラー列と serializeDispatch の出力キーが完全一致する', () => {
+  const schemaPath = resolve(here, '../../prisma/schema.prisma');
+  const schema = readFileSync(schemaPath, 'utf-8');
+  const modelNames = collectModelNames(schema);
+  const scalarFields = extractDispatchScalarFields(schema, modelNames);
   const serialized = serializeDispatch(dummyDispatch());
   assert.deepEqual(scalarFields.sort(), Object.keys(serialized).sort());
 });
+
+test('188. #135 の一般化（モデル宣言名による除外）は保護を弱めない: Thread/Message/DispatchAttachment いずれも決め打ち無しで正しく除外され、serializeDispatch の22キーと1つも過不足なく一致する', () => {
+  const schemaPath = resolve(here, '../../prisma/schema.prisma');
+  const schema = readFileSync(schemaPath, 'utf-8');
+  const modelNames = collectModelNames(schema);
+  // サイクル1.28 で追加した DispatchAttachment も含め、schema 内の全モデルが集まっていること。
+  assert.ok(modelNames.has('Thread'));
+  assert.ok(modelNames.has('Message'));
+  assert.ok(modelNames.has('Dispatch'));
+  assert.ok(modelNames.has('DispatchAttachment'));
+  const scalarFields = extractDispatchScalarFields(schema, modelNames);
+  // リレーション列（thread/message/attachments）が1つも紛れ込んでいないこと。
+  assert.equal(scalarFields.includes('thread'), false);
+  assert.equal(scalarFields.includes('message'), false);
+  assert.equal(scalarFields.includes('attachments'), false);
+  // なりすまし対策: モデル宣言されていない型名（例えば独自の "Tier" 型もどき）は
+  // 依然としてスカラー扱いされる（除外規則が広がりすぎて何でも通す退化をしていないこと）。
+  assert.equal(bareTypeNameForTest('SomeUndeclaredType?'), 'SomeUndeclaredType');
+  assert.equal(modelNames.has('SomeUndeclaredType'), false);
+  // 22列（DispatchDetail 全列）と完全一致し続けていること。
+  assert.deepEqual(scalarFields.sort(), Object.keys(serializeDispatch(dummyDispatch())).sort());
+});
+
+/** 上のなりすまし対策アサーションのためだけの薄いエイリアス（bareTypeName を再利用）。 */
+function bareTypeNameForTest(fieldType: string): string {
+  return bareTypeName(fieldType);
+}
 
 test('136. listThreadDispatchesHttpStatus: ok は 200、thread_not_found は 404', () => {
   const ok: ListThreadDispatchesResult = { ok: true, dispatches: [] };

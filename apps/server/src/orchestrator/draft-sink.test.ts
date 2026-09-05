@@ -106,3 +106,51 @@ test('163. prismaDraftSink: council: true を渡すと create の data.council �
   });
   assert.equal(capturedData?.council, true);
 });
+
+test('207. prismaDraftSink: attachments 未指定/空配列なら create の data に attachments キーが含まれない（1.27 以前と同形）', async () => {
+  let capturedData: Record<string, unknown> | undefined;
+  const stubClient: DraftCreateClient = {
+    async create(args) {
+      capturedData = args.data as unknown as Record<string, unknown>;
+      return { id: 'dispatch-attachments-off' };
+    },
+  };
+  const sink = prismaDraftSink(stubClient);
+  await sink.createDraft({
+    threadId: 't1',
+    projectId: 'p1',
+    instruction: '本文',
+    tier: 'standard',
+    model: 'claude-sonnet-5',
+    attachments: [],
+  });
+  assert.equal('attachments' in (capturedData as object), false);
+});
+
+test('208. prismaDraftSink: attachments 指定時は sortOrder 昇順の nested create として data.attachments に載る（サイクル1.28）', async () => {
+  let capturedData: Record<string, unknown> | undefined;
+  const stubClient: DraftCreateClient = {
+    async create(args) {
+      capturedData = args.data as unknown as Record<string, unknown>;
+      return { id: 'dispatch-attachments-on' };
+    },
+  };
+  const sink = prismaDraftSink(stubClient);
+  await sink.createDraft({
+    threadId: 't1',
+    projectId: 'p1',
+    instruction: '本文',
+    tier: 'standard',
+    model: 'claude-sonnet-5',
+    attachments: [
+      { filename: 'pasted-text.txt', mimeType: 'text/plain', content: 'aGVsbG8=', byteSize: 5 },
+      { filename: 'note.md', mimeType: 'text/markdown', content: 'd29ybGQ=', byteSize: 5 },
+    ],
+  });
+  const attachments = capturedData?.attachments as { create: Array<Record<string, unknown>> };
+  assert.equal(attachments.create.length, 2);
+  assert.equal(attachments.create[0].filename, 'pasted-text.txt');
+  assert.equal(attachments.create[0].sortOrder, 0);
+  assert.equal(attachments.create[1].filename, 'note.md');
+  assert.equal(attachments.create[1].sortOrder, 1);
+});

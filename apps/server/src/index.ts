@@ -12,6 +12,7 @@ import { coreRoutes } from './routes/core.js';
 import { dispatchRoutes } from './routes/dispatch.js';
 import { orchestratorRoutes } from './routes/orchestrator.js';
 import { parseWorkerMode, startDispatchWorker } from './orchestrator/dispatch-worker.js';
+import type { AttachmentReader } from './orchestrator/dispatch-worker.js';
 import type { DispatchQueryClient } from './orchestrator/dispatch-store.js';
 import { readManagerSettingsFile } from './orchestrator/manager-settings.js';
 import { prisma } from './db/client.js';
@@ -29,7 +30,10 @@ declare module 'fastify' {
   }
 }
 
-const app = Fastify({ logger: true });
+// サイクル1.28: 既定の bodyLimit（1MB）だと base64 添付（合計10MBの生データが base64 で
+// 約4/3に膨らみ約13.4MBになる）を積んだ POST /threads/:id/orchestrate が 413 で弾かれる。
+// 16MB へ引き上げて安全マージンを確保する（instruction 本文20,000文字分の余白込み）。
+const app = Fastify({ logger: true, bodyLimit: 16 * 1024 * 1024 });
 
 // 未知の値をサイレントに 'off' へ倒さず fail-loud にする（no-silent-failure）。
 const workerMode = parseWorkerMode(process.env.DISPATCH_WORKER_MODE);
@@ -157,11 +161,22 @@ if (workerMode === 'resident') {
     approveImplementation: coreClient.approveImplementation,
     getBuildStatus: coreClient.getBuildStatus,
   };
+  // サイクル1.28: DispatchAttachment を submit 直前にのみ読む（一覧 API には登場させない）。
+  const attachmentReader: AttachmentReader = {
+    async listForDispatch(dispatchId) {
+      return prisma.dispatchAttachment.findMany({
+        where: { dispatchId },
+        orderBy: { sortOrder: 'asc' },
+        select: { filename: true, mimeType: true, content: true, sortOrder: true },
+      });
+    },
+  };
   startDispatchWorker({
     client: dispatchClient,
     core: workerCore,
     intervalMs: Number(process.env.DISPATCH_WORKER_INTERVAL_MS ?? 30_000),
     log: (message) => app.log.info(message),
+    attachments: attachmentReader,
   });
 }
 

@@ -13,6 +13,7 @@ import { shouldPoll } from './lib/dispatch-status.js';
 import { ThreadList } from './components/ThreadList.js';
 import { Timeline } from './components/Timeline.js';
 import { Composer } from './components/Composer.js';
+import type { WireAttachment } from './components/Composer.js';
 import { ProjectPicker } from './components/ProjectPicker.js';
 import { SignIn } from './components/SignIn.js';
 import { readToken, readAuthError, clearToken, onAuthCleared } from './auth.js';
@@ -137,19 +138,24 @@ export function App() {
     }
   }
 
-  async function handleSend(content: string, council: boolean) {
+  async function handleSend(content: string, council: boolean, attachments: WireAttachment[]) {
     if (!selectedThreadId) {
       return;
     }
     setSendDisabled(true);
     try {
       try {
-        await api.orchestrate(selectedThreadId, content, selectedProjectIds, council);
+        await api.orchestrate(selectedThreadId, content, selectedProjectIds, council, attachments);
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
           // orchestrate 未提供（DISPATCH_WORKER_MODE=off）。メッセージのみ記録する。
+          // このフォールバックには attachments を渡す経路が無いため、添付は記録されない
+          // ことを黙って捨てずに info として明示する（サイクル1.28）。
           await api.createMessage(selectedThreadId, 'user', content);
-          setInfoMessage('orchestrate は未提供です（DISPATCH_WORKER_MODE=off）。メッセージのみ記録しました。');
+          setInfoMessage(
+            'orchestrate は未提供です（DISPATCH_WORKER_MODE=off）。メッセージのみ記録しました。' +
+              (attachments.length > 0 ? '（添付は記録されませんでした）' : '')
+          );
         } else {
           throw err;
         }

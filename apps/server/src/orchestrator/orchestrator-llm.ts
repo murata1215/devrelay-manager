@@ -32,6 +32,8 @@ import type { Tier, Intent } from './tier.js';
 import { annotateCandidates } from './project-proposal.js';
 import type { ProjectCandidate, AnnotatedCandidate } from './project-proposal.js';
 import type { DraftSink } from './draft-sink.js';
+import { buildAttachmentContext } from './attachment.js';
+import type { DecodedAttachment } from './attachment.js';
 
 /** LLM 呼び出しの usage（トークン数）。記録のみ・集計は非スコープ（サイクル1.13）。 */
 export interface LlmUsage {
@@ -83,6 +85,14 @@ export interface OrchestrateInput {
    * @default(false) に委ねる。1.20 の approveNote と同じ「明示時だけ含める」流儀）。
    */
   council?: boolean;
+  /**
+   * サイクル1.28: チャット入力へのテキスト添付（フェーズ1）。ルート（routes/orchestrator.ts）が
+   * validateAttachments で検証・デコード済みの結果をそのまま渡す。この層は buildAttachmentContext で
+   * LLM への user 入力文字列にのみ verbatim で連結する（仕様5: instruction 本文には一切展開しない。
+   * composeInstruction の入力は従来どおり LLM が返した body のみ）。draft.createDraft へもそのまま
+   * 転送し、DispatchAttachment として永続化する（worker が submit 直前に読む）。
+   */
+  attachments?: readonly DecodedAttachment[];
 }
 
 export type OrchestrateResult =
@@ -171,10 +181,13 @@ function buildSystemPrompt(
 export async function orchestrate(deps: OrchestrateDeps, input: OrchestrateInput): Promise<OrchestrateResult> {
   const annotated = annotateCandidates(input.candidates, input.managerRepoPath);
 
+  const attachments = input.attachments ?? [];
   const completion = await deps.llm.complete({
     model: resolveModel(resolveTier(input.intent ?? null, input.tierOverride ?? null), deps.settings),
     system: buildSystemPrompt(input.candidates, input.preferredProjectIds),
-    user: input.content,
+    // サイクル1.28 仕様4: 添付は要約・切り詰めせず verbatim で LLM 入力にのみ連結する。
+    // 添付が空なら buildAttachmentContext は input.content をそのまま返す（1.27 以前と同形）。
+    user: buildAttachmentContext(input.content, attachments),
   });
 
   const parsed = parseLlmOutput(completion.text);
@@ -218,6 +231,17 @@ export async function orchestrate(deps: OrchestrateDeps, input: OrchestrateInput
     responseModel: completion.model,
     // サイクル1.21: true のときだけ含める。未指定/false は既存と同形の呼び出しを保つ。
     ...(input.council === true ? { council: true } : {}),
+    // サイクル1.28: 添付が非空のときだけ含める（未指定/空配列は既存と同形の呼び出しを保つ）。
+    ...(attachments.length > 0
+      ? {
+          attachments: attachments.map((a) => ({
+            filename: a.filename,
+            mimeType: a.mimeType,
+            content: a.content,
+            byteSize: a.byteSize,
+          })),
+        }
+      : {}),
   });
 
   return {

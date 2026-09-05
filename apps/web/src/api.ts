@@ -15,6 +15,7 @@ import type {
 } from './types.js';
 import { buildApprovePlanBody } from './lib/approve-plan-body.js';
 import { buildOrchestrateBody } from './lib/orchestrate-body.js';
+import type { OrchestrateAttachment } from './lib/orchestrate-body.js';
 import { readToken, clearToken } from './auth.js';
 
 /**
@@ -137,16 +138,18 @@ export function listProjects(): Promise<CoreProjectDto[]> {
  * （サーバー側の後方互換な扱いに合わせる）。
  * council はサイクル1.21 で追加された協議トグル。true のときだけ送る
  * （body 組み立ては lib/orchestrate-body.ts に切り出しテスト可能にしている）。
+ * attachments はサイクル1.28 で追加されたテキスト添付。未指定/空なら送らない。
  */
 export function orchestrate(
   threadId: string,
   content: string,
   projectIds?: string[],
-  council?: boolean
+  council?: boolean,
+  attachments?: OrchestrateAttachment[]
 ): Promise<OrchestrateResultDto> {
   return request<OrchestrateResultDto>(`/threads/${threadId}/orchestrate`, {
     method: 'POST',
-    body: buildOrchestrateBody(content, projectIds, council),
+    body: buildOrchestrateBody(content, projectIds, council, attachments),
   });
 }
 

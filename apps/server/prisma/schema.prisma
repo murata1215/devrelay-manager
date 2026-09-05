@@ -86,8 +86,35 @@ model Dispatch {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  /// サイクル1.28: チャット入力へのテキスト添付（フェーズ1）。リレーション列であり
+  /// スカラー列ではないため #135（schema と serializeDispatch の一致検査）の対象外
+  /// （dispatch-view.test.ts はモデル宣言名を機械的に集めて除外するよう一般化してある）。
+  attachments     DispatchAttachment[]
+
   @@index([threadId])
   @@index([messageId])
   @@index([projectId])
   @@index([status, statusChangedAt])
+}
+
+/// サイクル1.28: チャット入力に添付されたテキストファイル（フェーズ1はテキストのみ、
+/// 画像はフェーズ2）。core の submit_instruction の attachments パラメータへ「そのまま」
+/// 載せるための保管庫であり、instruction 本文には一切展開しない（仕様5）。
+/// base64 のまま持ち、dispatch-worker.ts が submit 直前にのみ読む（一覧 API では返さない
+/// ＝4秒ポーリングする GET /threads/:id/dispatches に base64 本体を載せないため）。
+model DispatchAttachment {
+  id         String   @id @default(cuid())
+  dispatchId String
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+  filename   String
+  mimeType   String
+  /// base64 エンコード済みの本体（core へ渡す content と同一形式）。
+  content    String
+  /// デコード後の生バイト数（上限判定・UI 表示に使う。core への送信時には含めない）。
+  byteSize   Int
+  /// 添付順（0始まり）。core へ渡す配列の順序を再現するために持つ。
+  sortOrder  Int
+  createdAt  DateTime @default(now())
+
+  @@index([dispatchId])
 }
